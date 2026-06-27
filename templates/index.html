@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BambuScribe</title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
+    <script type="module" src="https://esm.run/@material/web/all.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <style>
+        :root {
+            --bg-color: #FBFDFD;
+            --surface-color: #ffffff;
+            --text-color: #191C1D;
+            --border-color: #e0e0e0;
+            --canvas-bg: #eef2f3;
+            --md-sys-color-primary: #006874;
+            --md-sys-color-on-primary: #ffffff;
+            --md-sys-color-secondary-container: #cce8e7;
+            --md-sys-color-on-secondary-container: #004f58;
+        }
+
+        body.dark-mode {
+            --bg-color: #1a1c1e;
+            --surface-color: #202427;
+            --text-color: #e2e2e6;
+            --border-color: #41474d;
+            --canvas-bg: #2a2d31;
+            --md-sys-color-primary: #4fd8eb;
+            --md-sys-color-on-primary: #00363d;
+            --md-sys-color-secondary-container: #004f58;
+            --md-sys-color-on-secondary-container: #cce8e7;
+        }
+
+        body { font-family: 'Roboto', sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 20px; transition: background-color 0.3s, color 0.3s; }
+        .header { display: flex; justify-content: space-between; align-items: center; max-width: 1200px; margin: 0 auto 30px auto; }
+        .header h1 { margin: 0; }
+        .container { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+        .card { background: var(--surface-color); border: 1px solid var(--border-color); border-radius: 24px; padding: 24px; box-shadow: 0px 4px 8px rgba(0,0,0,0.05); display: flex; flex-direction: column; }
+        .full-width { grid-column: span 2; }
+        h2 { margin-top: 0; font-weight: 500; display: flex; align-items: center; gap: 8px; }
+
+        #warning-banner { display: none; background-color: #442222; color: #ffcccc; padding: 12px; border-radius: 8px; margin-bottom: 16px; border: 1px solid #cc0000; font-weight: bold; text-align: center; }
+        #canvas-container { width: 100%; height: 400px; background: var(--canvas-bg); border-radius: 12px; overflow: hidden; cursor: grab;}
+        #canvas-container:active { cursor: grabbing; }
+
+        .controls-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; text-align: center; margin-top: 10px; }
+        .step-selector { margin: 20px 0; display: flex; gap: 12px; align-items: center; justify-content: center; background: var(--bg-color); padding: 16px; border-radius: 16px; border: 1px solid var(--border-color); }
+        .axis-controls { display: flex; flex-direction: column; gap: 12px; background: var(--bg-color); padding: 16px; border-radius: 16px; border: 1px solid var(--border-color); }
+
+        .camera-container { width: 100%; height: 500px; background: #000; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: #fff; overflow: hidden; }
+        #camera-stream { width: 100%; height: 100%; object-fit: contain; }
+
+        .editor-settings { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; align-items: center; }
+        .editor-input { width: 100%; padding: 12px; background: var(--bg-color); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 8px; font-family: monospace; font-size: 16px; margin-bottom: 16px; resize: vertical; min-height: 120px; box-sizing: border-box; }
+
+        .slider-group { display: flex; flex-direction: column; gap: 24px; background: var(--bg-color); padding: 24px; border-radius: 16px; border: 1px solid var(--border-color); }
+        .slider-item { display: flex; flex-direction: column; gap: 8px; }
+        .slider-label { display: flex; justify-content: space-between; font-weight: 500; font-size: 14px; color: var(--text-color); }
+
+        .img-uploader { border: 2px dashed var(--border-color); border-radius: 16px; padding: 40px; text-align: center; cursor: pointer; transition: background 0.3s; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;}
+        .img-uploader:hover { background: var(--canvas-bg); }
+
+        #preview-2d { width: 100%; aspect-ratio: 1; border: 1px solid var(--border-color); border-radius: 12px; background: var(--canvas-bg); display: none; }
+        .zoom-controls { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+
+        #queue-display { margin-top: 16px; padding: 8px; font-size: 13px; font-family: monospace; background: var(--bg-color); border-radius: 8px; color: var(--text-color); flex-grow: 1; overflow-y: auto; max-height: 100px; border: 1px solid var(--border-color); }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>BambuScribe</h1>
+        <md-icon-button id="theme-toggle"><md-icon>dark_mode</md-icon></md-icon-button>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <h2><md-icon>deployed_code</md-icon> Visualizer</h2>
+            <div id="canvas-container"></div>
+            <div class="zoom-controls">
+                <md-icon>zoom_in</md-icon>
+                <md-slider id="vis-zoom" min="0.5" max="5.0" value="1.0" step="0.1" style="flex: 1;"></md-slider>
+            </div>
+            <p id="coord-display" style="font-weight: bold; text-align: center; margin-top: 10px; font-size: 18px;">X: 0.0 | Y: 0.0 | Z: 0.0</p>
+        </div>
+
+        <div class="card">
+            <h2><md-icon>gamepad</md-icon> Controls</h2>
+            <div id="warning-banner"></div>
+
+            <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                <md-filled-button style="flex: 1;" id="btn-home"><md-icon slot="icon">home</md-icon> Home All</md-filled-button>
+                <md-filled-tonal-button style="flex: 1;" id="btn-origin"><md-icon slot="icon">crop_free</md-icon> Set BBox (0/4)</md-filled-tonal-button>
+            </div>
+
+            <div style="display: flex; gap: 10px; align-items: center; margin-top: 10px; margin-bottom: 10px;">
+                <md-outlined-text-field id="manual-speed" type="number" value="12000" label="XY Speed" style="flex: 1;"></md-outlined-text-field>
+                <md-outlined-text-field id="manual-speed-z" type="number" value="12000" label="Z Speed" style="flex: 1;"></md-outlined-text-field>
+            </div>
+
+            <div class="step-selector">
+                <span style="font-weight: 500;">Dist:</span>
+                <md-outlined-button class="quick-step" data-val="1">1 mm</md-outlined-button>
+                <md-outlined-text-field id="step-input" type="number" value="1" style="width: 100px;" suffix-text="mm"></md-outlined-text-field>
+                <md-outlined-button class="quick-step" data-val="10">10 mm</md-outlined-button>
+            </div>
+
+            <div class="controls-grid" id="movement-controls" style="opacity: 0.5; pointer-events: none;">
+                <div class="axis-controls">
+                    <strong>X (Left/Right)</strong>
+                    <md-filled-tonal-button class="btn-move" data-axis="X" data-dir="1">X +</md-filled-tonal-button>
+                    <md-outlined-button class="btn-move" data-axis="X" data-dir="-1">X -</md-outlined-button>
+                </div>
+                <div class="axis-controls">
+                    <strong>Y (Fwd/Back)</strong>
+                    <md-filled-tonal-button class="btn-move" data-axis="Y" data-dir="1">Y +</md-filled-tonal-button>
+                    <md-outlined-button class="btn-move" data-axis="Y" data-dir="-1">Y -</md-outlined-button>
+                </div>
+                <div class="axis-controls">
+                    <strong>Z (Pen Up/Dn)</strong>
+                    <md-filled-tonal-button class="btn-move" data-axis="Z" data-dir="1">Z Up</md-filled-tonal-button>
+                    <md-outlined-button class="btn-move" data-axis="Z" data-dir="-1">Z Down</md-outlined-button>
+                </div>
+            </div>
+
+            <div id="queue-display">Command Queue Empty</div>
+        </div>
+
+        <div class="card full-width">
+            <div style="display: flex; flex-direction: column; gap: 16px; margin-bottom: 24px; border-bottom: 1px solid var(--border-color); padding-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h2><md-icon>draw</md-icon> Plotting Engine</h2>
+                    <div style="display: flex; gap: 8px;">
+                        <md-filled-button id="btn-tab-text" onclick="window.setTab('text')"><md-icon slot="icon">text_fields</md-icon> Write Text</md-filled-button>
+                        <md-outlined-button id="btn-tab-img" onclick="window.setTab('image')"><md-icon slot="icon">image</md-icon> Plot Image</md-outlined-button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="view-text">
+                <div class="editor-settings">
+                    <md-outlined-select id="doc-font" label="Font Style">
+                        <md-select-option value="scripts" selected><div slot="headline">Cursive (Single)</div></md-select-option>
+                        <md-select-option value="rowmans"><div slot="headline">Standard (Single)</div></md-select-option>
+                        <md-select-option value="scriptc"><div slot="headline">Fancy Cursive</div></md-select-option>
+                    </md-outlined-select>
+                    <md-outlined-text-field id="doc-spacing" type="number" label="Line Gap (mm)" value="10"></md-outlined-text-field>
+                    <md-outlined-text-field id="doc-size" type="number" label="Scale (%)" value="100"></md-outlined-text-field>
+                    <md-outlined-select id="doc-speed" label="Plot Speed">
+                        <md-select-option value="2000"><div slot="headline">Slow (2000)</div></md-select-option>
+                        <md-select-option value="5000" selected><div slot="headline">Normal (5000)</div></md-select-option>
+                        <md-select-option value="12000"><div slot="headline">Fast (12000)</div></md-select-option>
+                    </md-outlined-select>
+                </div>
+                <div style="margin-bottom: 16px; display: flex; gap: 24px;">
+                    <label style="display: flex; align-items: center; gap: 8px;">
+                        <md-checkbox id="doc-auto-wrap" checked></md-checkbox>
+                        <span style="font-weight: 500; font-size: 14px;">Auto-Wrap Text</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px;">
+                        <md-checkbox id="doc-draw-bbox"></md-checkbox>
+                        <span style="font-weight: 500; font-size: 14px;">Draw Bounding Box</span>
+                    </label>
+                </div>
+                <textarea class="editor-input" id="doc-text" placeholder="Type text here..."></textarea>
+            </div>
+
+            <div id="view-image" style="display: none; grid-template-columns: 1fr 1fr; gap: 24px;">
+                <div style="display: flex; flex-direction: column; gap: 16px;">
+                    <div style="display: flex; gap: 16px;">
+                        <div class="img-uploader" id="upload-box" onclick="document.getElementById('img-input').click()">
+                            <md-icon style="font-size: 48px; color: var(--md-sys-color-primary);">add_photo_alternate</md-icon>
+                            <p style="font-size: 16px; font-weight: 500; margin: 10px 0 0 0;">Upload Image</p>
+                            <input type="file" id="img-input" accept="image/png, image/jpeg, image/webp" style="display: none;">
+                        </div>
+                        <canvas id="preview-2d"></canvas>
+                    </div>
+                    <md-outlined-select id="img-method" label="Plotting Method" style="width: 100%;">
+                        <md-select-option value="hatch" selected><div slot="headline">Crosshatching (Classic)</div></md-select-option>
+                        <md-select-option value="tsp"><div slot="headline">Stippling (TSP)</div></md-select-option>
+                        <md-select-option value="canny"><div slot="headline">Vector Tracing (Canny)</div></md-select-option>
+                    </md-outlined-select>
+                </div>
+
+                <div class="slider-group">
+                    <label style="display: flex; align-items: center; gap: 8px;">
+                        <md-checkbox id="img-draw-bbox"></md-checkbox>
+                        <span style="font-weight: 500; font-size: 14px;">Draw Bounding Box</span>
+                    </label>
+                    <div class="slider-item">
+                        <div class="slider-label"><span>Density / Line Gap</span><span id="label-gap">1.0 mm</span></div>
+                        <md-slider id="img-gap" min="0.2" max="3.0" value="1.0" step="0.1"></md-slider>
+                    </div>
+                    <div class="slider-item">
+                        <div class="slider-label"><span>Contrast / Threshold</span><span id="label-contrast">1.5 x</span></div>
+                        <md-slider id="img-contrast" min="0.5" max="4.0" value="1.5" step="0.1"></md-slider>
+                    </div>
+                    <md-outlined-select id="img-speed" label="Plot Speed">
+                        <md-select-option value="5000"><div slot="headline">Normal (5000)</div></md-select-option>
+                        <md-select-option value="12000" selected><div slot="headline">Fast (12000)</div></md-select-option>
+                    </md-outlined-select>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 16px; justify-content: flex-end; margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 20px;">
+                <md-outlined-button id="btn-preview"><md-icon slot="icon">visibility</md-icon> Preview</md-outlined-button>
+                <md-filled-button id="btn-plot" disabled><md-icon slot="icon">play_arrow</md-icon> Start Plotting!</md-filled-button>
+
+                <md-filled-button id="btn-pause" style="display: none;"><md-icon slot="icon">pause</md-icon> Pause</md-filled-button>
+                <md-filled-button id="btn-resume" style="display: none;"><md-icon slot="icon">play_arrow</md-icon> Resume</md-filled-button>
+                <md-filled-button id="btn-estop" style="display: none; --md-sys-color-primary: #ba1a1a; --md-sys-color-on-primary: #ffffff;"><md-icon slot="icon">stop</md-icon> Cancel / Done</md-filled-button>
+            </div>
+        </div>
+
+        <div class="card full-width">
+            <h2><md-icon>videocam</md-icon> Live Camera Feed</h2>
+            <div class="camera-container"><img id="camera-stream" src="/video_feed" alt="Camera Stream"></div>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        let currentMode = 'text';
+        let base64Image = null;
+        let previewTimeout = null;
+        let isHomed = false;
+        let isPreviewing = false;
+        let pendingPreview = false;
+
+        let currentPos = {x: 0, y: 0, z: 0};
+
+        let bboxPoints = JSON.parse(localStorage.getItem('plotter_bbox_points')) || [];
+
+        let manualQueue = [];
+        let predictedPos = {x: 0, y: 0, z: 0};
+        let isProcessingQueue = false;
+
+        const themeToggle = document.getElementById('theme-toggle');
+        const updateTheme = () => {
+            themeToggle.innerHTML = document.body.classList.contains('dark-mode') ? '<md-icon>light_mode</md-icon>' : '<md-icon>dark_mode</md-icon>';
+            localStorage.setItem('plotter_theme', document.body.classList.contains('dark-mode') ? 'dark' : 'light');
+        };
+        if(localStorage.getItem('plotter_theme') === 'dark') document.body.classList.add('dark-mode');
+        updateTheme();
+
+        themeToggle.addEventListener('click', () => {
+            document.body.classList.toggle('dark-mode');
+            updateTheme();
+            if (bboxPoints.length === 4) triggerPreview();
+        });
+
+        window.setTab = function(mode) {
+            currentMode = mode;
+            document.getElementById('view-text').style.display = mode === 'text' ? 'block' : 'none';
+            document.getElementById('view-image').style.display = mode === 'image' ? 'grid' : 'none';
+
+            document.getElementById('btn-tab-text').outerHTML = mode === 'text'
+                ? `<md-filled-button id="btn-tab-text" onclick="window.setTab('text')"><md-icon slot="icon">text_fields</md-icon> Write Text</md-filled-button>`
+                : `<md-outlined-button id="btn-tab-text" onclick="window.setTab('text')"><md-icon slot="icon">text_fields</md-icon> Write Text</md-outlined-button>`;
+
+            document.getElementById('btn-tab-img').outerHTML = mode === 'image'
+                ? `<md-filled-button id="btn-tab-img" onclick="window.setTab('image')"><md-icon slot="icon">image</md-icon> Plot Image</md-filled-button>`
+                : `<md-outlined-button id="btn-tab-img" onclick="window.setTab('image')"><md-icon slot="icon">image</md-icon> Plot Image</md-outlined-button>`;
+
+            const btnOrigin = document.getElementById('btn-origin');
+            if (bboxPoints.length === 4) {
+                btnOrigin.innerHTML = `<md-icon slot="icon">clear</md-icon> Clear BBox`;
+            } else {
+                btnOrigin.innerHTML = `<md-icon slot="icon">crop_free</md-icon> Set BBox (${bboxPoints.length}/4)`;
+            }
+        };
+
+        const imgSettings = JSON.parse(localStorage.getItem('plotter_img_settings')) || {};
+        if (imgSettings.gap) { document.getElementById('img-gap').value = imgSettings.gap; document.getElementById('label-gap').innerText = parseFloat(imgSettings.gap).toFixed(1) + ' mm'; }
+        if (imgSettings.contrast) { document.getElementById('img-contrast').value = imgSettings.contrast; document.getElementById('label-contrast').innerText = parseFloat(imgSettings.contrast).toFixed(1) + ' x'; }
+        if (imgSettings.method) document.getElementById('img-method').value = imgSettings.method;
+        if (imgSettings.speed) document.getElementById('img-speed').value = imgSettings.speed;
+        if (imgSettings.drawBBox !== undefined) document.getElementById('img-draw-bbox').checked = imgSettings.drawBBox;
+
+        const txtSettings = JSON.parse(localStorage.getItem('plotter_text_settings')) || {};
+        if (txtSettings.font) document.getElementById('doc-font').value = txtSettings.font;
+        if (txtSettings.spacing) document.getElementById('doc-spacing').value = txtSettings.spacing;
+        if (txtSettings.size) document.getElementById('doc-size').value = txtSettings.size;
+        if (txtSettings.speed) document.getElementById('doc-speed').value = txtSettings.speed;
+        if (txtSettings.drawBBox !== undefined) document.getElementById('doc-draw-bbox').checked = txtSettings.drawBBox;
+        if (txtSettings.autoWrap !== undefined) document.getElementById('doc-auto-wrap').checked = txtSettings.autoWrap;
+
+        function saveImgSettings() {
+            localStorage.setItem('plotter_img_settings', JSON.stringify({
+                gap: document.getElementById('img-gap').value,
+                contrast: document.getElementById('img-contrast').value,
+                method: document.getElementById('img-method').value,
+                speed: document.getElementById('img-speed').value,
+                drawBBox: document.getElementById('img-draw-bbox').checked
+            }));
+        }
+
+        function saveTxtSettings() {
+            localStorage.setItem('plotter_text_settings', JSON.stringify({
+                font: document.getElementById('doc-font').value,
+                spacing: document.getElementById('doc-spacing').value,
+                size: document.getElementById('doc-size').value,
+                speed: document.getElementById('doc-speed').value,
+                drawBBox: document.getElementById('doc-draw-bbox').checked,
+                autoWrap: document.getElementById('doc-auto-wrap').checked
+            }));
+        }
+
+        function autoPreview() {
+            if (currentMode === 'image' && !base64Image) return;
+            if (bboxPoints.length !== 4) return;
+
+            clearTimeout(previewTimeout);
+            previewTimeout = setTimeout(() => triggerPreview(), 300);
+        }
+
+        document.getElementById('doc-font').addEventListener('change', () => { saveTxtSettings(); autoPreview(); });
+        document.getElementById('doc-spacing').addEventListener('input', () => { saveTxtSettings(); autoPreview(); });
+        document.getElementById('doc-text').addEventListener('input', () => { autoPreview(); });
+        document.getElementById('doc-size').addEventListener('input', () => { saveTxtSettings(); autoPreview(); });
+        document.getElementById('doc-speed').addEventListener('change', saveTxtSettings);
+        document.getElementById('doc-draw-bbox').addEventListener('change', () => { saveTxtSettings(); autoPreview(); });
+        document.getElementById('doc-auto-wrap').addEventListener('change', () => { saveTxtSettings(); autoPreview(); });
+
+        document.getElementById('img-input').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                base64Image = event.target.result;
+                document.getElementById('upload-box').style.display = 'none';
+                document.getElementById('preview-2d').style.display = 'block';
+                autoPreview();
+            };
+            reader.readAsDataURL(file);
+        });
+
+        document.getElementById('img-gap').addEventListener('input', (e) => { document.getElementById('label-gap').innerText = parseFloat(e.target.value).toFixed(1) + ' mm'; saveImgSettings(); autoPreview(); });
+        document.getElementById('img-contrast').addEventListener('input', (e) => { document.getElementById('label-contrast').innerText = parseFloat(e.target.value).toFixed(1) + ' x'; saveImgSettings(); autoPreview(); });
+        document.getElementById('img-method').addEventListener('change', () => { saveImgSettings(); autoPreview(); });
+        document.getElementById('img-speed').addEventListener('change', () => saveImgSettings());
+        document.getElementById('img-draw-bbox').addEventListener('change', () => { saveImgSettings(); autoPreview(); });
+
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        container.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true; controls.target.set(0, 90, 0);
+
+        scene.add(new THREE.GridHelper(180, 18, 0x888888, 0x555555));
+        const wireframeBox = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(180, 180, 180)), new THREE.LineBasicMaterial({ color: 0x006874, transparent: true, opacity: 0.3 }));
+        wireframeBox.position.set(0, 90, 0);
+        scene.add(wireframeBox);
+
+        const toolhead = new THREE.Mesh(new THREE.SphereGeometry(5, 32, 32), new THREE.MeshBasicMaterial({ color: 0xff0000 }));
+        scene.add(toolhead);
+
+        const targetHead = new THREE.Mesh(new THREE.SphereGeometry(5, 32, 32), new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.5 }));
+        targetHead.visible = false;
+        scene.add(targetHead);
+
+        const bboxDots = [];
+        for (let i = 0; i < 4; i++) {
+            const d = new THREE.Mesh(new THREE.SphereGeometry(3, 16, 16), new THREE.MeshBasicMaterial({ color: 0x2196f3 }));
+            d.visible = false;
+            scene.add(d);
+            bboxDots.push(d);
+        }
+
+        const textPathsGroup = new THREE.Group();
+        scene.add(textPathsGroup);
+
+        camera.position.set(250, 200, 250);
+
+        document.getElementById('vis-zoom').addEventListener('input', (e) => {
+            camera.zoom = parseFloat(e.target.value);
+            camera.updateProjectionMatrix();
+        });
+
+        function animate() { requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); }
+        animate();
+
+        function update3DVisualizer(x, y, z) {
+            currentPos = { x, y, z };
+            toolhead.position.set(x - 90, z, 90 - y);
+            document.getElementById('coord-display').innerText = `X: ${x.toFixed(1)} | Y: ${y.toFixed(1)} | Z: ${z.toFixed(1)}`;
+            if (manualQueue.length === 0) {
+                predictedPos = { ...currentPos };
+                updateTargetDot();
+            }
+        }
+        update3DVisualizer(0, 0, 0);
+
+        function updateTargetDot() {
+            if (manualQueue.length > 0) {
+                targetHead.position.set(predictedPos.x - 90, predictedPos.z, 90 - predictedPos.y);
+                targetHead.visible = true;
+            } else {
+                targetHead.visible = false;
+            }
+        }
+
+        const warningBanner = document.getElementById('warning-banner');
+        function showWarning(msg) { warningBanner.innerText = msg; warningBanner.style.display = 'block'; setTimeout(() => warningBanner.style.display = 'none', 6000); }
+
+        document.querySelectorAll('.quick-step').forEach(btn => {
+            btn.addEventListener('click', (e) => document.getElementById('step-input').value = e.target.dataset.val);
+        });
+
+        document.getElementById('btn-home').addEventListener('click', async () => {
+            try {
+                const res = await fetch('/api/home', { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    isHomed = true;
+                    document.getElementById('movement-controls').style.opacity = '1';
+                    document.getElementById('movement-controls').style.pointerEvents = 'auto';
+                    update3DVisualizer(data.state.position.x, data.state.position.y, data.state.position.z);
+                    manualQueue = [];
+                    predictedPos = {...currentPos};
+                    updateTargetDot();
+                    updateQueueUI();
+                }
+            } catch (err) {}
+        });
+
+        function updateQueueUI() {
+            const qd = document.getElementById('queue-display');
+            if (manualQueue.length === 0) {
+                qd.innerHTML = "Command Queue Empty";
+            } else {
+                qd.innerHTML = manualQueue.map((c, i) => `[${i+1}] Move ${c.axis} by ${c.amount > 0 ? '+'+c.amount : c.amount} @ F${c.speed}`).join('<br>');
+            }
+        }
+
+        async function processQueue() {
+            if (isProcessingQueue) return;
+            isProcessingQueue = true;
+
+            while(manualQueue.length > 0) {
+                const cmd = manualQueue[0];
+                try {
+                    const res = await fetch('/api/move', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(cmd)
+                    });
+                    const data = await res.json();
+                    if (data.status === 'success') {
+                        update3DVisualizer(data.state.position.x, data.state.position.y, data.state.position.z);
+                        await new Promise(r => setTimeout(r, data.duration * 1000));
+                    } else {
+                        showWarning(data.message);
+                        manualQueue = [];
+                        predictedPos = {...currentPos};
+                        break;
+                    }
+                } catch (err) {
+                    manualQueue = [];
+                    predictedPos = {...currentPos};
+                    break;
+                }
+                manualQueue.shift();
+                updateQueueUI();
+            }
+
+            isProcessingQueue = false;
+            updateTargetDot();
+        }
+
+        document.querySelectorAll('.btn-move').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                if (!isHomed) return;
+                const axis = e.target.dataset.axis;
+                const dir = parseFloat(e.target.dataset.dir);
+                const val = parseFloat(document.getElementById('step-input').value);
+                const speed = axis === 'Z' ? document.getElementById('manual-speed-z').value : document.getElementById('manual-speed').value;
+                if (isNaN(val) || val <= 0) return;
+
+                let nextPos = {...predictedPos};
+                nextPos[axis.toLowerCase()] += val * dir;
+
+                if(nextPos.x < 0 || nextPos.x > 180 || nextPos.y < 0 || nextPos.y > 180 || nextPos.z < 0 || nextPos.z > 180) {
+                    showWarning(`Move block: ${axis} bounds exceeded!`);
+                    return;
+                }
+
+                predictedPos = nextPos;
+                manualQueue.push({ axis, amount: val * dir, speed });
+                updateTargetDot();
+                updateQueueUI();
+                processQueue();
+            });
+        });
+
+        document.getElementById('btn-origin').addEventListener('click', () => {
+            if (!isHomed) return showWarning("Home first to track coordinates.");
+
+            if (bboxPoints.length < 4) {
+                bboxPoints.push({ ...currentPos });
+                localStorage.setItem('plotter_bbox_points', JSON.stringify(bboxPoints));
+
+                if (bboxPoints.length === 4) {
+                    document.getElementById('btn-origin').innerHTML = `<md-icon slot="icon">clear</md-icon> Clear BBox`;
+                    updateBBoxDots();
+                    showWarning("Bounding box complete!");
+                    autoPreview();
+                } else {
+                    document.getElementById('btn-origin').innerHTML = `<md-icon slot="icon">crop_free</md-icon> Set BBox (${bboxPoints.length}/4)`;
+                    updateBBoxDots();
+                }
+            } else {
+                bboxPoints = [];
+                localStorage.removeItem('plotter_bbox_points');
+                document.getElementById('btn-origin').innerHTML = `<md-icon slot="icon">crop_free</md-icon> Set BBox (0/4)`;
+                updateBBoxDots();
+                textPathsGroup.clear();
+                document.getElementById('btn-plot').disabled = true;
+            }
+        });
+
+        function updateBBoxDots() {
+            bboxDots.forEach(d => d.visible = false);
+            if (bboxPoints.length === 4) {
+                const minX = Math.min(...bboxPoints.map(p => p.x));
+                const maxX = Math.max(...bboxPoints.map(p => p.x));
+                const minY = Math.min(...bboxPoints.map(p => p.y));
+                const maxY = Math.max(...bboxPoints.map(p => p.y));
+                const z = bboxPoints[0].z;
+
+                const corners = [
+                    {x: minX, y: minY}, {x: maxX, y: minY},
+                    {x: maxX, y: maxY}, {x: minX, y: maxY}
+                ];
+
+                corners.forEach((c, i) => {
+                    bboxDots[i].position.set(c.x - 90, z, 90 - c.y);
+                    bboxDots[i].visible = true;
+                });
+            } else {
+                bboxPoints.forEach((p, i) => {
+                    bboxDots[i].position.set(p.x - 90, p.z, 90 - p.y);
+                    bboxDots[i].visible = true;
+                });
+            }
+        }
+
+        function getPayload() {
+            if (bboxPoints.length !== 4) return null;
+
+            let bbox = {
+                min_x: Math.min(...bboxPoints.map(p => p.x)),
+                max_x: Math.max(...bboxPoints.map(p => p.x)),
+                min_y: Math.min(...bboxPoints.map(p => p.y)),
+                max_y: Math.max(...bboxPoints.map(p => p.y)),
+                origin_z: bboxPoints[0].z
+            };
+
+            const draw_bbox = currentMode === 'text'
+                ? document.getElementById('doc-draw-bbox').checked
+                : document.getElementById('img-draw-bbox').checked;
+
+            if (currentMode === 'text') {
+                return {
+                    type: 'text',
+                    text: document.getElementById('doc-text').value,
+                    bbox: bbox,
+                    draw_bbox: draw_bbox,
+                    auto_wrap: document.getElementById('doc-auto-wrap').checked,
+                    font: document.getElementById('doc-font').value,
+                    line_spacing: document.getElementById('doc-spacing').value,
+                    font_size: document.getElementById('doc-size').value,
+                    speed: document.getElementById('doc-speed').value
+                };
+            } else {
+                if (!base64Image) return null;
+                return {
+                    type: 'image',
+                    image: base64Image,
+                    bbox: bbox,
+                    draw_bbox: draw_bbox,
+                    method: document.getElementById('img-method').value,
+                    img_gap: document.getElementById('img-gap').value,
+                    img_contrast: document.getElementById('img-contrast').value,
+                    speed: document.getElementById('img-speed').value
+                };
+            }
+        }
+
+        async function triggerPreview() {
+            if (isPreviewing) { pendingPreview = true; return; }
+
+            const payload = getPayload();
+            if(!payload) {
+                if (bboxPoints.length !== 4) showWarning("Set 4-point Bounding Box first!");
+                return;
+            }
+
+            isPreviewing = true;
+            const btnPreview = document.getElementById('btn-preview');
+            const originalText = btnPreview.innerHTML;
+            btnPreview.innerHTML = `<md-icon slot="icon">sync</md-icon> Calculating...`;
+
+            try {
+                const res = await fetch('/api/preview', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    textPathsGroup.clear();
+                    const inkColor = document.body.classList.contains('dark-mode') ? 0x4fd8eb : 0x006874;
+                    const points = [];
+                    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+
+                    data.paths.forEach(segment => {
+                        points.push(new THREE.Vector3(segment[0].x - 90, data.origin_z, 90 - segment[0].y));
+                        points.push(new THREE.Vector3(segment[1].x - 90, data.origin_z, 90 - segment[1].y));
+                        minX = Math.min(minX, segment[0].x, segment[1].x);
+                        maxX = Math.max(maxX, segment[0].x, segment[1].x);
+                        minY = Math.min(minY, segment[0].y, segment[1].y);
+                        maxY = Math.max(maxY, segment[0].y, segment[1].y);
+                    });
+
+                    const geo = new THREE.BufferGeometry().setFromPoints(points);
+                    const mat = new THREE.LineBasicMaterial({ color: inkColor });
+                    textPathsGroup.add(new THREE.LineSegments(geo, mat));
+
+                    if (currentMode === 'image') {
+                        const canvas = document.getElementById('preview-2d');
+                        canvas.width = canvas.parentElement.clientWidth;
+                        canvas.height = canvas.width;
+                        const ctx = canvas.getContext('2d');
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                        const w = maxX - minX, h = maxY - minY;
+                        if(w > 0 && h > 0) {
+                            const scale = Math.min(canvas.width / w, canvas.height / h) * 0.9;
+                            ctx.save();
+                            ctx.translate(canvas.width/2 - (w/2)*scale, canvas.height/2 - (h/2)*scale);
+                            ctx.beginPath();
+                            data.paths.forEach(s => {
+                                ctx.moveTo((s[0].x - minX) * scale, (maxY - s[0].y) * scale);
+                                ctx.lineTo((s[1].x - minX) * scale, (maxY - s[1].y) * scale);
+                            });
+                            ctx.strokeStyle = document.body.classList.contains('dark-mode') ? '#4fd8eb' : '#006874';
+                            ctx.lineWidth = 0.5;
+                            ctx.stroke();
+                            ctx.restore();
+                        }
+                    }
+                    document.getElementById('btn-plot').disabled = false;
+                } else showWarning(data.message);
+            } catch (err) {}
+
+            btnPreview.innerHTML = originalText;
+            isPreviewing = false;
+            if (pendingPreview) { pendingPreview = false; triggerPreview(); }
+        }
+
+        document.getElementById('btn-preview').addEventListener('click', triggerPreview);
+
+        document.getElementById('btn-plot').addEventListener('click', async () => {
+            if(!confirm("Ready to draw? Ensure pen is lowered and paper is secure!")) return;
+
+            document.getElementById('btn-plot').style.display = 'none';
+            document.getElementById('btn-preview').style.display = 'none';
+            document.getElementById('btn-pause').style.display = 'inline-flex';
+            document.getElementById('btn-estop').style.display = 'inline-flex';
+
+            const res = await fetch('/api/plot', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(getPayload()) });
+            const data = await res.json();
+
+            if (data.status !== 'success') {
+                showWarning(data.message);
+                resetPlottingUI();
+            }
+        });
+
+        document.getElementById('btn-pause').addEventListener('click', async () => {
+            await fetch('/api/pause', { method: 'POST' });
+            document.getElementById('btn-pause').style.display = 'none';
+            document.getElementById('btn-resume').style.display = 'inline-flex';
+        });
+
+        document.getElementById('btn-resume').addEventListener('click', async () => {
+            await fetch('/api/resume', { method: 'POST' });
+            document.getElementById('btn-resume').style.display = 'none';
+            document.getElementById('btn-pause').style.display = 'inline-flex';
+        });
+
+        document.getElementById('btn-estop').addEventListener('click', async () => {
+            if(!confirm("Are you sure you want to completely STOP the current plot or clear the UI?")) return;
+            await fetch('/api/stop', { method: 'POST' });
+            resetPlottingUI();
+        });
+
+        function resetPlottingUI() {
+            document.getElementById('btn-pause').style.display = 'none';
+            document.getElementById('btn-resume').style.display = 'none';
+            document.getElementById('btn-estop').style.display = 'none';
+            document.getElementById('btn-preview').style.display = 'inline-flex';
+            document.getElementById('btn-plot').style.display = 'inline-flex';
+        }
+
+        updateBBoxDots();
+        window.setTab(currentMode);
+        if (bboxPoints.length === 4) {
+            setTimeout(autoPreview, 200);
+        }
+
+    </script>
+</body>
+</html>
