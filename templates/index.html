@@ -79,6 +79,17 @@
 </head>
 <body>
 
+    <div id="model-modal" style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; display:flex; align-items:center; justify-content:center;">
+        <div style="background:var(--surface-color); padding:32px; border-radius:24px; text-align:center; max-width:400px; box-shadow: 0 8px 24px rgba(0,0,0,0.2);">
+            <h2 style="margin-top:0;">Select Printer Model</h2>
+            <p style="margin-bottom:24px; color:var(--text-color);">Choose your 3D printer model to configure the correct bed size for plotting.</p>
+            <div style="display:flex; flex-direction:column; gap:16px;">
+                <md-filled-button onclick="selectModel(180)">A1 mini (180x180x180)</md-filled-button>
+                <md-filled-tonal-button onclick="selectModel(256)">A1 (Beta) (256x256x256)</md-filled-tonal-button>
+            </div>
+        </div>
+    </div>
+
     <div class="header">
         <h1>BambuScribe</h1>
         <md-icon-button id="theme-toggle"><md-icon>dark_mode</md-icon></md-icon-button>
@@ -102,6 +113,11 @@
             <div style="display: flex; gap: 10px; margin-bottom: 10px;">
                 <md-filled-button style="flex: 1;" id="btn-home"><md-icon slot="icon">home</md-icon> Home All</md-filled-button>
                 <md-filled-tonal-button style="flex: 1;" id="btn-origin"><md-icon slot="icon">crop_free</md-icon> Set BBox (0/4)</md-filled-tonal-button>
+            </div>
+
+            <div id="bbox-manage-container" style="display: none; flex-direction: column; gap: 8px; margin-bottom: 10px; padding: 12px; background: var(--bg-color); border-radius: 12px; border: 1px solid var(--border-color);">
+                <div style="font-weight: 500; font-size: 14px; margin-bottom: 4px;">Bounding Box Points</div>
+                <div id="bbox-points-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
             </div>
 
             <div style="display: flex; gap: 10px; align-items: center; margin-top: 10px; margin-bottom: 10px;">
@@ -141,7 +157,8 @@
             <div style="display: flex; flex-direction: column; gap: 16px; margin-bottom: 24px; border-bottom: 1px solid var(--border-color); padding-bottom: 16px;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <h2><md-icon>draw</md-icon> Plotting Engine</h2>
-                    <div style="display: flex; gap: 8px;">
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <md-outlined-text-field id="global-zhop" type="number" label="Pen Z-Hop (mm)" value="4" style="width:140px;"></md-outlined-text-field>
                         <md-filled-button id="btn-tab-text" onclick="window.setTab('text')"><md-icon slot="icon">text_fields</md-icon> Write Text</md-filled-button>
                         <md-outlined-button id="btn-tab-img" onclick="window.setTab('image')"><md-icon slot="icon">image</md-icon> Plot Image</md-outlined-button>
                     </div>
@@ -149,6 +166,10 @@
             </div>
 
             <div id="view-text">
+                <p style="font-size: 13px; color: #666; margin: 0 0 16px 0;">
+                    <md-icon style="font-size:16px; vertical-align:middle;">info</md-icon>
+                    The top of the bounding box will align with the top line of a lined paper. Line gap represents the distance to the next line. Font scale sets the letter size within that gap.
+                </p>
                 <div class="editor-settings">
                     <md-outlined-select id="doc-font" label="Font Style">
                         <md-select-option value="scripts" selected><div slot="headline">Cursive (Single)</div></md-select-option>
@@ -206,10 +227,32 @@
                         <div class="slider-label"><span>Contrast / Threshold</span><span id="label-contrast">1.5 x</span></div>
                         <md-slider id="img-contrast" min="0.5" max="4.0" value="1.5" step="0.1"></md-slider>
                     </div>
+                    <div class="slider-item">
+                        <div class="slider-label"><span>Scale / Resize</span><span id="label-scale">100 %</span></div>
+                        <md-slider id="img-scale" min="10" max="300" value="100" step="1"></md-slider>
+                    </div>
+                    <div class="slider-item">
+                        <div class="slider-label"><span>Rotation</span><span id="label-rotate">0 &deg;</span></div>
+                        <md-slider id="img-rotate" min="-180" max="180" value="0" step="1"></md-slider>
+                    </div>
+                    <div style="display: flex; gap: 16px;">
+                        <md-outlined-text-field id="img-offset-x" type="number" label="Offset X (mm)" value="0" style="flex:1;"></md-outlined-text-field>
+                        <md-outlined-text-field id="img-offset-y" type="number" label="Offset Y (mm)" value="0" style="flex:1;"></md-outlined-text-field>
+                    </div>
                     <md-outlined-select id="img-speed" label="Plot Speed">
                         <md-select-option value="5000"><div slot="headline">Normal (5000)</div></md-select-option>
                         <md-select-option value="12000" selected><div slot="headline">Fast (12000)</div></md-select-option>
                     </md-outlined-select>
+                </div>
+            </div>
+
+            <div id="progress-container" style="display:none; margin-top: 16px; flex-direction: column; gap: 8px;">
+                <div style="display:flex; justify-content:space-between; font-weight:500;">
+                    <span>Plotting Progress</span>
+                    <span id="progress-text">0%</span>
+                </div>
+                <div style="width:100%; background:var(--canvas-bg); height:8px; border-radius:4px; overflow:hidden;">
+                    <div id="progress-bar" style="width:0%; background:var(--md-sys-color-primary); height:100%; transition:width 0.3s;"></div>
                 </div>
             </div>
 
@@ -233,6 +276,7 @@
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
+        let BED_SIZE = 180;
         let currentMode = 'text';
         let base64Image = null;
         let previewTimeout = null;
@@ -241,12 +285,66 @@
         let pendingPreview = false;
 
         let currentPos = {x: 0, y: 0, z: 0};
-
         let bboxPoints = JSON.parse(localStorage.getItem('plotter_bbox_points')) || [];
-
         let manualQueue = [];
         let predictedPos = {x: 0, y: 0, z: 0};
         let isProcessingQueue = false;
+
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        container.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        let gridHelper, wireframeBox;
+        const toolhead = new THREE.Mesh(new THREE.SphereGeometry(5, 32, 32), new THREE.MeshBasicMaterial({ color: 0xff0000 }));
+        scene.add(toolhead);
+
+        const targetHead = new THREE.Mesh(new THREE.SphereGeometry(5, 32, 32), new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.5 }));
+        targetHead.visible = false;
+        scene.add(targetHead);
+
+        const bboxDots = [];
+        for (let i = 0; i < 4; i++) {
+            const d = new THREE.Mesh(new THREE.SphereGeometry(3, 16, 16), new THREE.MeshBasicMaterial({ color: 0x2196f3 }));
+            d.visible = false;
+            scene.add(d);
+            bboxDots.push(d);
+        }
+
+        const textPathsGroup = new THREE.Group();
+        scene.add(textPathsGroup);
+
+        window.selectModel = function(size) {
+            BED_SIZE = size;
+            document.getElementById('model-modal').style.display = 'none';
+            init3DScene();
+            if (bboxPoints.length === 4) {
+                updateBBoxDots();
+                renderBBoxList();
+                autoPreview();
+            }
+        };
+
+        function init3DScene() {
+            if(gridHelper) scene.remove(gridHelper);
+            if(wireframeBox) scene.remove(wireframeBox);
+
+            gridHelper = new THREE.GridHelper(BED_SIZE, BED_SIZE/10, 0x888888, 0x555555);
+            wireframeBox = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(BED_SIZE, BED_SIZE, BED_SIZE)), new THREE.LineBasicMaterial({ color: 0x006874, transparent: true, opacity: 0.3 }));
+            wireframeBox.position.set(0, BED_SIZE/2, 0);
+
+            scene.add(gridHelper);
+            scene.add(wireframeBox);
+
+            controls.target.set(0, BED_SIZE/2, 0);
+            camera.position.set(BED_SIZE * 1.4, BED_SIZE * 1.1, BED_SIZE * 1.4);
+            update3DVisualizer(currentPos.x, currentPos.y, currentPos.z);
+        }
 
         const themeToggle = document.getElementById('theme-toggle');
         const updateTheme = () => {
@@ -286,6 +384,10 @@
         const imgSettings = JSON.parse(localStorage.getItem('plotter_img_settings')) || {};
         if (imgSettings.gap) { document.getElementById('img-gap').value = imgSettings.gap; document.getElementById('label-gap').innerText = parseFloat(imgSettings.gap).toFixed(1) + ' mm'; }
         if (imgSettings.contrast) { document.getElementById('img-contrast').value = imgSettings.contrast; document.getElementById('label-contrast').innerText = parseFloat(imgSettings.contrast).toFixed(1) + ' x'; }
+        if (imgSettings.scale) { document.getElementById('img-scale').value = imgSettings.scale; document.getElementById('label-scale').innerText = parseInt(imgSettings.scale) + ' %'; }
+        if (imgSettings.rotate !== undefined) { document.getElementById('img-rotate').value = imgSettings.rotate; document.getElementById('label-rotate').innerHTML = parseInt(imgSettings.rotate) + ' &deg;'; }
+        if (imgSettings.offsetX !== undefined) document.getElementById('img-offset-x').value = imgSettings.offsetX;
+        if (imgSettings.offsetY !== undefined) document.getElementById('img-offset-y').value = imgSettings.offsetY;
         if (imgSettings.method) document.getElementById('img-method').value = imgSettings.method;
         if (imgSettings.speed) document.getElementById('img-speed').value = imgSettings.speed;
         if (imgSettings.drawBBox !== undefined) document.getElementById('img-draw-bbox').checked = imgSettings.drawBBox;
@@ -297,11 +399,16 @@
         if (txtSettings.speed) document.getElementById('doc-speed').value = txtSettings.speed;
         if (txtSettings.drawBBox !== undefined) document.getElementById('doc-draw-bbox').checked = txtSettings.drawBBox;
         if (txtSettings.autoWrap !== undefined) document.getElementById('doc-auto-wrap').checked = txtSettings.autoWrap;
+        if (txtSettings.zhop) document.getElementById('global-zhop').value = txtSettings.zhop;
 
         function saveImgSettings() {
             localStorage.setItem('plotter_img_settings', JSON.stringify({
                 gap: document.getElementById('img-gap').value,
                 contrast: document.getElementById('img-contrast').value,
+                scale: document.getElementById('img-scale').value,
+                rotate: document.getElementById('img-rotate').value,
+                offsetX: document.getElementById('img-offset-x').value,
+                offsetY: document.getElementById('img-offset-y').value,
                 method: document.getElementById('img-method').value,
                 speed: document.getElementById('img-speed').value,
                 drawBBox: document.getElementById('img-draw-bbox').checked
@@ -315,7 +422,8 @@
                 size: document.getElementById('doc-size').value,
                 speed: document.getElementById('doc-speed').value,
                 drawBBox: document.getElementById('doc-draw-bbox').checked,
-                autoWrap: document.getElementById('doc-auto-wrap').checked
+                autoWrap: document.getElementById('doc-auto-wrap').checked,
+                zhop: document.getElementById('global-zhop').value
             }));
         }
 
@@ -334,6 +442,7 @@
         document.getElementById('doc-speed').addEventListener('change', saveTxtSettings);
         document.getElementById('doc-draw-bbox').addEventListener('change', () => { saveTxtSettings(); autoPreview(); });
         document.getElementById('doc-auto-wrap').addEventListener('change', () => { saveTxtSettings(); autoPreview(); });
+        document.getElementById('global-zhop').addEventListener('input', saveTxtSettings);
 
         document.getElementById('img-input').addEventListener('change', (e) => {
             const file = e.target.files[0];
@@ -350,44 +459,13 @@
 
         document.getElementById('img-gap').addEventListener('input', (e) => { document.getElementById('label-gap').innerText = parseFloat(e.target.value).toFixed(1) + ' mm'; saveImgSettings(); autoPreview(); });
         document.getElementById('img-contrast').addEventListener('input', (e) => { document.getElementById('label-contrast').innerText = parseFloat(e.target.value).toFixed(1) + ' x'; saveImgSettings(); autoPreview(); });
+        document.getElementById('img-scale').addEventListener('input', (e) => { document.getElementById('label-scale').innerText = parseInt(e.target.value) + ' %'; saveImgSettings(); autoPreview(); });
+        document.getElementById('img-rotate').addEventListener('input', (e) => { document.getElementById('label-rotate').innerHTML = parseInt(e.target.value) + ' &deg;'; saveImgSettings(); autoPreview(); });
+        document.getElementById('img-offset-x').addEventListener('input', () => { saveImgSettings(); autoPreview(); });
+        document.getElementById('img-offset-y').addEventListener('input', () => { saveImgSettings(); autoPreview(); });
         document.getElementById('img-method').addEventListener('change', () => { saveImgSettings(); autoPreview(); });
         document.getElementById('img-speed').addEventListener('change', () => saveImgSettings());
         document.getElementById('img-draw-bbox').addEventListener('change', () => { saveImgSettings(); autoPreview(); });
-
-        const container = document.getElementById('canvas-container');
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-        renderer.setSize(container.clientWidth, container.clientHeight);
-        container.appendChild(renderer.domElement);
-
-        const controls = new OrbitControls(camera, renderer.domElement);
-        controls.enableDamping = true; controls.target.set(0, 90, 0);
-
-        scene.add(new THREE.GridHelper(180, 18, 0x888888, 0x555555));
-        const wireframeBox = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(180, 180, 180)), new THREE.LineBasicMaterial({ color: 0x006874, transparent: true, opacity: 0.3 }));
-        wireframeBox.position.set(0, 90, 0);
-        scene.add(wireframeBox);
-
-        const toolhead = new THREE.Mesh(new THREE.SphereGeometry(5, 32, 32), new THREE.MeshBasicMaterial({ color: 0xff0000 }));
-        scene.add(toolhead);
-
-        const targetHead = new THREE.Mesh(new THREE.SphereGeometry(5, 32, 32), new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.5 }));
-        targetHead.visible = false;
-        scene.add(targetHead);
-
-        const bboxDots = [];
-        for (let i = 0; i < 4; i++) {
-            const d = new THREE.Mesh(new THREE.SphereGeometry(3, 16, 16), new THREE.MeshBasicMaterial({ color: 0x2196f3 }));
-            d.visible = false;
-            scene.add(d);
-            bboxDots.push(d);
-        }
-
-        const textPathsGroup = new THREE.Group();
-        scene.add(textPathsGroup);
-
-        camera.position.set(250, 200, 250);
 
         document.getElementById('vis-zoom').addEventListener('input', (e) => {
             camera.zoom = parseFloat(e.target.value);
@@ -399,18 +477,17 @@
 
         function update3DVisualizer(x, y, z) {
             currentPos = { x, y, z };
-            toolhead.position.set(x - 90, z, 90 - y);
+            toolhead.position.set(x - BED_SIZE/2, z, BED_SIZE/2 - y);
             document.getElementById('coord-display').innerText = `X: ${x.toFixed(1)} | Y: ${y.toFixed(1)} | Z: ${z.toFixed(1)}`;
             if (manualQueue.length === 0) {
                 predictedPos = { ...currentPos };
                 updateTargetDot();
             }
         }
-        update3DVisualizer(0, 0, 0);
 
         function updateTargetDot() {
             if (manualQueue.length > 0) {
-                targetHead.position.set(predictedPos.x - 90, predictedPos.z, 90 - predictedPos.y);
+                targetHead.position.set(predictedPos.x - BED_SIZE/2, predictedPos.z, BED_SIZE/2 - predictedPos.y);
                 targetHead.visible = true;
             } else {
                 targetHead.visible = false;
@@ -426,7 +503,7 @@
 
         document.getElementById('btn-home').addEventListener('click', async () => {
             try {
-                const res = await fetch('/api/home', { method: 'POST' });
+                const res = await fetch('/api/home', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bed_size: BED_SIZE }) });
                 const data = await res.json();
                 if (data.status === 'success') {
                     isHomed = true;
@@ -460,7 +537,7 @@
                     const res = await fetch('/api/move', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(cmd)
+                        body: JSON.stringify({ ...cmd, bed_size: BED_SIZE })
                     });
                     const data = await res.json();
                     if (data.status === 'success') {
@@ -497,7 +574,7 @@
                 let nextPos = {...predictedPos};
                 nextPos[axis.toLowerCase()] += val * dir;
 
-                if(nextPos.x < 0 || nextPos.x > 180 || nextPos.y < 0 || nextPos.y > 180 || nextPos.z < 0 || nextPos.z > 180) {
+                if(nextPos.x < 0 || nextPos.x > BED_SIZE || nextPos.y < 0 || nextPos.y > BED_SIZE || nextPos.z < 0 || nextPos.z > BED_SIZE) {
                     showWarning(`Move block: ${axis} bounds exceeded!`);
                     return;
                 }
@@ -520,17 +597,20 @@
                 if (bboxPoints.length === 4) {
                     document.getElementById('btn-origin').innerHTML = `<md-icon slot="icon">clear</md-icon> Clear BBox`;
                     updateBBoxDots();
+                    renderBBoxList();
                     showWarning("Bounding box complete!");
                     autoPreview();
                 } else {
                     document.getElementById('btn-origin').innerHTML = `<md-icon slot="icon">crop_free</md-icon> Set BBox (${bboxPoints.length}/4)`;
                     updateBBoxDots();
+                    renderBBoxList();
                 }
             } else {
                 bboxPoints = [];
                 localStorage.removeItem('plotter_bbox_points');
                 document.getElementById('btn-origin').innerHTML = `<md-icon slot="icon">crop_free</md-icon> Set BBox (0/4)`;
                 updateBBoxDots();
+                renderBBoxList();
                 textPathsGroup.clear();
                 document.getElementById('btn-plot').disabled = true;
             }
@@ -551,14 +631,95 @@
                 ];
 
                 corners.forEach((c, i) => {
-                    bboxDots[i].position.set(c.x - 90, z, 90 - c.y);
+                    bboxDots[i].position.set(c.x - BED_SIZE/2, z, BED_SIZE/2 - c.y);
                     bboxDots[i].visible = true;
                 });
             } else {
                 bboxPoints.forEach((p, i) => {
-                    bboxDots[i].position.set(p.x - 90, p.z, 90 - p.y);
+                    bboxDots[i].position.set(p.x - BED_SIZE/2, p.z, BED_SIZE/2 - p.y);
                     bboxDots[i].visible = true;
                 });
+            }
+        }
+
+        function renderBBoxList() {
+            const list = document.getElementById('bbox-points-list');
+            const container = document.getElementById('bbox-manage-container');
+            if (bboxPoints.length === 0) {
+                container.style.display = 'none';
+                return;
+            }
+            container.style.display = 'flex';
+            list.innerHTML = '';
+            bboxPoints.forEach((pt, i) => {
+                const row = document.createElement('div');
+                row.style.display = 'flex';
+                row.style.justifyContent = 'space-between';
+                row.style.alignItems = 'center';
+                row.style.fontSize = '14px';
+                row.style.background = 'var(--surface-color)';
+                row.style.padding = '8px 12px';
+                row.style.borderRadius = '8px';
+                row.style.border = '1px solid var(--border-color)';
+
+                const label = document.createElement('span');
+                label.innerHTML = `<strong>P${i+1}</strong> <span style="color:#888; font-family:monospace; margin-left:8px;">X${pt.x.toFixed(1)} Y${pt.y.toFixed(1)}</span>`;
+
+                const actions = document.createElement('div');
+                actions.style.display = 'flex';
+                actions.style.gap = '8px';
+
+                const btnGo = document.createElement('md-outlined-button');
+                btnGo.innerHTML = `<md-icon slot="icon" style="font-size:18px;">my_location</md-icon> Go`;
+                btnGo.style.setProperty('--md-outlined-button-container-shape', '8px');
+                btnGo.onclick = () => jumpToBBoxPoint(i);
+
+                const btnUpdate = document.createElement('md-filled-tonal-button');
+                btnUpdate.innerHTML = `<md-icon slot="icon" style="font-size:18px;">edit_location</md-icon> Update`;
+                btnUpdate.style.setProperty('--md-filled-tonal-button-container-shape', '8px');
+                btnUpdate.onclick = () => updateBBoxPoint(i);
+
+                actions.appendChild(btnGo);
+                actions.appendChild(btnUpdate);
+
+                row.appendChild(label);
+                row.appendChild(actions);
+                list.appendChild(row);
+            });
+        }
+
+        async function jumpToBBoxPoint(i) {
+            if (!isHomed) return showWarning("Home first!");
+            manualQueue = [];
+            updateQueueUI();
+            const pt = bboxPoints[i];
+            const speed = document.getElementById('manual-speed').value || 12000;
+            const z_hop = document.getElementById('global-zhop').value || 4.0;
+
+            try {
+                const res = await fetch('/api/goto_absolute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ x: pt.x, y: pt.y, z: pt.z, speed: speed, bed_size: BED_SIZE, z_hop: z_hop })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    update3DVisualizer(data.state.position.x, data.state.position.y, data.state.position.z);
+                    predictedPos = {...data.state.position};
+                    updateTargetDot();
+                } else {
+                    showWarning(data.message);
+                }
+            } catch (e) {}
+        }
+
+        function updateBBoxPoint(i) {
+            bboxPoints[i] = { ...currentPos };
+            localStorage.setItem('plotter_bbox_points', JSON.stringify(bboxPoints));
+            renderBBoxList();
+            updateBBoxDots();
+            if (bboxPoints.length === 4) {
+                autoPreview();
             }
         }
 
@@ -576,6 +737,7 @@
             const draw_bbox = currentMode === 'text'
                 ? document.getElementById('doc-draw-bbox').checked
                 : document.getElementById('img-draw-bbox').checked;
+            const z_hop = document.getElementById('global-zhop').value;
 
             if (currentMode === 'text') {
                 return {
@@ -587,7 +749,9 @@
                     font: document.getElementById('doc-font').value,
                     line_spacing: document.getElementById('doc-spacing').value,
                     font_size: document.getElementById('doc-size').value,
-                    speed: document.getElementById('doc-speed').value
+                    speed: document.getElementById('doc-speed').value,
+                    z_hop: z_hop,
+                    bed_size: BED_SIZE
                 };
             } else {
                 if (!base64Image) return null;
@@ -599,7 +763,13 @@
                     method: document.getElementById('img-method').value,
                     img_gap: document.getElementById('img-gap').value,
                     img_contrast: document.getElementById('img-contrast').value,
-                    speed: document.getElementById('img-speed').value
+                    img_scale: document.getElementById('img-scale').value,
+                    img_rotate: document.getElementById('img-rotate').value,
+                    img_offset_x: document.getElementById('img-offset-x').value,
+                    img_offset_y: document.getElementById('img-offset-y').value,
+                    speed: document.getElementById('img-speed').value,
+                    z_hop: z_hop,
+                    bed_size: BED_SIZE
                 };
             }
         }
@@ -629,8 +799,8 @@
                     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
 
                     data.paths.forEach(segment => {
-                        points.push(new THREE.Vector3(segment[0].x - 90, data.origin_z, 90 - segment[0].y));
-                        points.push(new THREE.Vector3(segment[1].x - 90, data.origin_z, 90 - segment[1].y));
+                        points.push(new THREE.Vector3(segment[0].x - BED_SIZE/2, data.origin_z, BED_SIZE/2 - segment[0].y));
+                        points.push(new THREE.Vector3(segment[1].x - BED_SIZE/2, data.origin_z, BED_SIZE/2 - segment[1].y));
                         minX = Math.min(minX, segment[0].x, segment[1].x);
                         maxX = Math.max(maxX, segment[0].x, segment[1].x);
                         minY = Math.min(minY, segment[0].y, segment[1].y);
@@ -716,14 +886,36 @@
             document.getElementById('btn-estop').style.display = 'none';
             document.getElementById('btn-preview').style.display = 'inline-flex';
             document.getElementById('btn-plot').style.display = 'inline-flex';
+            document.getElementById('progress-container').style.display = 'none';
         }
 
+        setInterval(async () => {
+            if (!isHomed && !isProcessingQueue && currentPos.x === 0) return;
+            try {
+                const res = await fetch('/api/state');
+                const data = await res.json();
+                if (data.is_homed) {
+                    if (!isProcessingQueue && manualQueue.length === 0) {
+                        update3DVisualizer(data.position.x, data.position.y, data.position.z);
+                    }
+                    if (document.getElementById('btn-pause').style.display !== 'none' || document.getElementById('btn-resume').style.display !== 'none') {
+                        document.getElementById('progress-container').style.display = 'flex';
+                        document.getElementById('progress-bar').style.width = data.progress + '%';
+                        document.getElementById('progress-text').innerText = data.progress + '%';
+                        if (data.progress === 100) resetPlottingUI();
+                    } else {
+                        document.getElementById('progress-container').style.display = 'none';
+                    }
+                }
+            } catch(e) {}
+        }, 1000);
+
         updateBBoxDots();
+        renderBBoxList();
         window.setTab(currentMode);
         if (bboxPoints.length === 4) {
             setTimeout(autoPreview, 200);
         }
-
     </script>
 </body>
 </html>

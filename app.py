@@ -38,7 +38,8 @@ TOPIC_REPORT = f"device/{SERIAL_NUMBER}/report"
 
 printer_state = {
     "is_homed": False,
-    "position": {"x": 90, "y": 90, "z": 90}
+    "position": {"x": 90, "y": 90, "z": 90},
+    "progress": 0
 }
 
 sequence_id_counter = 2000
@@ -52,8 +53,10 @@ client.username_pw_set(MQTT_USER, ACCESS_CODE)
 client.tls_set(cert_reqs=ssl.CERT_NONE, tls_version=ssl.PROTOCOL_TLS)
 client.tls_insecure_set(True)
 
+
 def on_connect(client, userdata, flags, rc, properties=None):
     client.subscribe(TOPIC_REPORT)
+
 
 def on_message(client, userdata, msg):
     try:
@@ -63,6 +66,7 @@ def on_message(client, userdata, msg):
             acked_sequences.add(seq_id)
     except Exception:
         pass
+
 
 client.on_connect = on_connect
 client.on_message = on_message
@@ -79,6 +83,7 @@ except Exception as e:
     print("The web server will still start, but plotting commands will fail until the printer is reachable.")
     print("Check if the printer is awake, the IP is correct, and LAN Only Mode is active.\n")
 
+
 def send_printer_command(cmd, param=""):
     global sequence_id_counter
     sequence_id_counter += 1
@@ -92,9 +97,11 @@ def send_printer_command(cmd, param=""):
         payload["print"]["param"] = param
     client.publish(TOPIC_PUBLISH, json.dumps(payload, separators=(',', ':')))
 
+
 def send_gcode_chunk(gcode_string):
     formatted = "".join(f"{line.strip()} \n" for line in gcode_string.strip().split('\n') if line.strip())
     send_printer_command("gcode_line", formatted)
+
 
 def send_gcode_chunk_reliable(gcode_string):
     global sequence_id_counter, acked_sequences, plot_active, plot_paused
@@ -133,6 +140,7 @@ def send_gcode_chunk_reliable(gcode_string):
 
     return 0
 
+
 def generate_bambu_camera_stream():
     auth_packet = bytearray(
         [0x40, 0x00, 0x00, 0x00, 0x00, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
@@ -165,20 +173,32 @@ def generate_bambu_camera_stream():
     except Exception:
         pass
 
+
 @app.route('/')
 def index():
     return render_template('index.html')
+
 
 @app.route('/video_feed')
 def video_feed():
     return Response(generate_bambu_camera_stream(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
+
+@app.route('/api/state', methods=['GET'])
+def get_state():
+    return jsonify(printer_state)
+
+
 @app.route('/api/home', methods=['POST'])
 def home_axes():
-    send_gcode_chunk("G28\nG90\nG0 Z90 F600\nG0 X90 Y90 F12000")
+    bed_size = float(request.json.get('bed_size', 180.0)) if request.json else 180.0
+    mid = bed_size / 2.0
+    send_gcode_chunk(f"G28\nG90\nG0 Z90 F600\nG0 X{mid:.1f} Y{mid:.1f} F12000")
     printer_state["is_homed"] = True
-    printer_state["position"] = {"x": 90, "y": 90, "z": 90}
+    printer_state["position"] = {"x": mid, "y": mid, "z": 90}
+    printer_state["progress"] = 0
     return jsonify({"status": "success", "duration": 15, "state": printer_state})
+
 
 @app.route('/api/move', methods=['POST'])
 def move_axis():
@@ -187,9 +207,10 @@ def move_axis():
     axis = request.json.get('axis').upper()
     amount = float(request.json.get('amount'))
     speed = request.json.get('speed')
+    bed_size = float(request.json.get('bed_size', 180.0))
 
     new_pos = printer_state["position"][axis.lower()] + amount
-    if new_pos < 0 or new_pos > 180:
+    if new_pos < 0 or new_pos > bed_size:
         return jsonify({"status": "error", "message": f"HARD STOP: {axis} {new_pos} out of bounds."}), 400
 
     printer_state["position"][axis.lower()] = new_pos
@@ -203,11 +224,57 @@ def move_axis():
     send_gcode_chunk(f"G90\nG1 {axis}{new_pos} F{speed}")
     return jsonify({"status": "success", "duration": (abs(amount) / (speed / 60.0)) + 0.2, "state": printer_state})
 
+
+@app.route('/api/goto_absolute', methods=['POST'])
+def goto_absolute():
+    if not printer_state["is_homed"]: return jsonify({"status": "error", "message": "Home first!"}), 403
+
+    x = request.json.get('x')
+    y = request.json.get('y')
+    z = request.json.get('z')
+    speed = request.json.get('speed', 12000)
+    bed_size = float(request.json.get('bed_size', 180.0))
+    z_hop = float(request.json.get('z_hop', 4.0))
+
+    cmds = ["G90"]
+    duration = 0.2
+
+    if x is not None and y is not None and z is not None:
+        new_x, new_y, new_z = float(x), float(y), float(z)
+
+        if new_x < 0 or new_x > bed_size or new_y < 0 or new_y > bed_size:
+            return jsonify({"status": "error", "message": "HARD STOP: XY out of bounds."}), 400
+        if new_z < 0 or new_z > bed_size:
+            return jsonify({"status": "error", "message": f"HARD STOP: Z {new_z} out of bounds."}), 400
+
+        safe_z = min(new_z + 2.0 * z_hop, bed_size)
+
+        # 1. Translate Z to 2x z-hop before starting XY motion
+        printer_state["position"]['z'] = safe_z
+        cmds.append(f"G1 Z{safe_z:.2f} F1200")
+        duration += 1.0
+
+        # 2. Translate XY
+        printer_state["position"]['x'] = new_x
+        printer_state["position"]['y'] = new_y
+        cmds.append(f"G1 X{new_x:.2f} Y{new_y:.2f} F{speed}")
+        duration += 2.0
+
+        # 3. Drop Z down
+        printer_state["position"]['z'] = new_z
+        cmds.append(f"G1 Z{new_z:.2f} F1200")
+        duration += 1.0
+
+    send_gcode_chunk("\n".join(cmds))
+    return jsonify({"status": "success", "duration": duration, "state": printer_state})
+
+
 @app.route('/api/pause', methods=['POST'])
 def pause_plot():
     global plot_paused
     plot_paused = True
     return jsonify({"status": "success"})
+
 
 @app.route('/api/resume', methods=['POST'])
 def resume_plot():
@@ -215,19 +282,23 @@ def resume_plot():
     plot_paused = False
     return jsonify({"status": "success"})
 
+
 @app.route('/api/stop', methods=['POST'])
 def stop_plot():
-    global plot_active
+    global plot_active, printer_state
     plot_active = False
+    printer_state["progress"] = 0
     send_gcode_chunk("M410\nM18")
     return jsonify({"status": "success"})
+
 
 def generate_text_paths(text, font_style, line_gap_mm, font_pct, min_x, max_x, min_y, max_y, auto_wrap):
     hf = HersheyFonts()
     hf.load_default_font(font_style)
 
-    scale = (float(font_pct) / 100.0) * 0.5
     line_gap = float(line_gap_mm)
+    base_scale = line_gap / 25.0
+    scale = base_scale * (float(font_pct) / 100.0)
     target_w = max_x - min_x
 
     def get_text_width(t):
@@ -263,10 +334,16 @@ def generate_text_paths(text, font_style, line_gap_mm, font_pct, min_x, max_x, m
 
     final_paths = []
     ox = min_x
-    current_y = max_y - (15 * scale)
+    current_y = max_y - line_gap
 
     for line in wrapped_lines:
         if not line.strip():
+            current_y -= line_gap
+            continue
+
+        # If bounding box only has part of a lined section, omit it completely.
+        # This prevents printing if there's no vertical space left for the entire line depth.
+        if current_y - (15 * scale) < min_y:
             current_y -= line_gap
             continue
 
@@ -286,13 +363,27 @@ def generate_text_paths(text, font_style, line_gap_mm, font_pct, min_x, max_x, m
 
         current_y -= line_gap
 
-    if not final_paths: return None, "Text is empty."
+    if not final_paths: return None, "Text is empty or completely exceeds bounding box bounds."
+
+    # Check if text horizontally exceeds the bounds, throw warning!
+    for segment in final_paths:
+        for pt in segment:
+            if pt['x'] < min_x - 0.5 or pt['x'] > max_x + 0.5 or pt['y'] < min_y - 0.5 or pt['y'] > max_y + 0.5:
+                return None, "Text exceeds the bounding box! Please use Auto-Wrap, reduce scale, or increase bounding box size."
+
     return final_paths, "Success"
 
-def prepare_image(base64_img, box_w, box_h, contrast):
+
+def get_rotated_image_pil(base64_img, contrast, rotation):
     image_data = base64.b64decode(base64_img.split(',')[1])
     img = Image.open(io.BytesIO(image_data)).convert('L')
+    if rotation != 0:
+        img = img.rotate(-rotation, expand=True, fillcolor=255)
     img = ImageEnhance.Contrast(img).enhance(contrast)
+    return img
+
+
+def prepare_image(img, box_w, box_h):
     ppm = 4
 
     img_ratio = img.width / max(1, img.height)
@@ -309,6 +400,7 @@ def prepare_image(base64_img, box_w, box_h, contrast):
     px_h = int(final_h * ppm)
     img = img.resize((px_w, px_h))
     return img, px_w, px_h, ppm, final_w, final_h
+
 
 def gen_hatch(img, px_w, px_h, ppm, final_w, gap_mm, ox, oy):
     final_h = px_h / ppm
@@ -352,6 +444,7 @@ def gen_hatch(img, px_w, px_h, ppm, final_w, gap_mm, ox, oy):
     trace(starts, step, -step, 60)
     return paths
 
+
 def gen_tsp(img, px_w, px_h, ppm, final_w, gap_mm, ox, oy):
     final_h = px_h / ppm
     num_dots = int(4000 / max(0.5, gap_mm))
@@ -379,13 +472,12 @@ def gen_tsp(img, px_w, px_h, ppm, final_w, gap_mm, ox, oy):
         paths.append([p1, p2])
     return paths
 
-def gen_canny(base64_img, box_w, box_h, contrast, min_x, max_x, min_y, max_y):
-    nparr = np.frombuffer(base64.b64decode(base64_img.split(',')[1]), np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
-    img = cv2.convertScaleAbs(img, alpha=contrast, beta=0)
+
+def gen_canny(img_pil, box_w, box_h, min_x, max_x, min_y, max_y):
+    img_np = np.array(img_pil)
     ppm = 4
 
-    img_ratio = img.shape[1] / max(1, img.shape[0])
+    img_ratio = img_np.shape[1] / max(1, img_np.shape[0])
     box_ratio = box_w / max(0.1, box_h)
 
     if img_ratio > box_ratio:
@@ -397,8 +489,8 @@ def gen_canny(base64_img, box_w, box_h, contrast, min_x, max_x, min_y, max_y):
 
     px_w = int(final_w * ppm)
     px_h = int(final_h * ppm)
-    img = cv2.resize(img, (px_w, px_h))
-    edges = cv2.Canny(img, 100, 200)
+    img_resized = cv2.resize(img_np, (px_w, px_h))
+    edges = cv2.Canny(img_resized, 100, 200)
     contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
     ox = min_x + (box_w - final_w) / 2.0
@@ -412,8 +504,10 @@ def gen_canny(base64_img, box_w, box_h, contrast, min_x, max_x, min_y, max_y):
             paths.append([p1, p2])
     return paths
 
+
 def process_paths_request(data):
     bbox = data.get('bbox')
+    bed_size = float(data.get('bed_size', 180.0))
     if not bbox: return None, "Set Bounding Box (4 points) first."
 
     min_x, max_x = float(bbox['min_x']), float(bbox['max_x'])
@@ -433,13 +527,29 @@ def process_paths_request(data):
     else:
         method = data.get('method', 'hatch')
         try:
+            img_scale = float(data.get('img_scale', 100)) / 100.0
+            offset_x = float(data.get('img_offset_x', 0))
+            offset_y = float(data.get('img_offset_y', 0))
+            rotation = float(data.get('img_rotate', 0))
+
+            img_pil = get_rotated_image_pil(data['image'], float(data['img_contrast']), rotation)
+
             if method == 'canny':
-                paths = gen_canny(data['image'], box_w, box_h, float(data['img_contrast']), min_x, max_x, min_y, max_y)
+                raw_paths = gen_canny(img_pil, box_w, box_h, min_x, max_x, min_y, max_y)
+                cx = min_x + box_w / 2.0
+                cy = min_y + box_h / 2.0
+                for seg in raw_paths:
+                    p1x = cx + (seg[0]['x'] - cx) * img_scale + offset_x
+                    p1y = cy + (seg[0]['y'] - cy) * img_scale - offset_y
+                    p2x = cx + (seg[1]['x'] - cx) * img_scale + offset_x
+                    p2y = cy + (seg[1]['y'] - cy) * img_scale - offset_y
+                    paths.append([{"x": p1x, "y": p1y}, {"x": p2x, "y": p2y}])
             else:
-                img, px_w, px_h, ppm, final_w, final_h = prepare_image(data['image'], box_w, box_h,
-                                                                       float(data['img_contrast']))
-                ox = min_x + (box_w - final_w) / 2.0
-                oy = max_y - (box_h - final_h) / 2.0
+                img, px_w, px_h, ppm, final_w, final_h = prepare_image(img_pil, box_w, box_h)
+                final_w *= img_scale
+                final_h *= img_scale
+                ox = min_x + (box_w - final_w) / 2.0 + offset_x
+                oy = max_y - (box_h - final_h) / 2.0 - offset_y
 
                 if method == 'tsp':
                     paths = gen_tsp(img, px_w, px_h, ppm, final_w, float(data['img_gap']), ox, oy)
@@ -456,11 +566,12 @@ def process_paths_request(data):
         paths.append([{"x": min_x, "y": max_y}, {"x": min_x, "y": min_y}])
 
     safe_paths = []
+    # Grid checks applied everywhere, capping strictly to bed size
     for seg in paths:
-        x1 = max(0.0, min(180.0, seg[0]['x']))
-        y1 = max(0.0, min(180.0, seg[0]['y']))
-        x2 = max(0.0, min(180.0, seg[1]['x']))
-        y2 = max(0.0, min(180.0, seg[1]['y']))
+        x1 = max(0.0, min(bed_size, seg[0]['x']))
+        y1 = max(0.0, min(bed_size, seg[0]['y']))
+        x2 = max(0.0, min(bed_size, seg[1]['x']))
+        y2 = max(0.0, min(bed_size, seg[1]['y']))
 
         if abs(x1 - x2) < 0.001 and abs(y1 - y2) < 0.001:
             continue
@@ -469,15 +580,17 @@ def process_paths_request(data):
 
     return safe_paths, "Success"
 
+
 @app.route('/api/preview', methods=['POST'])
 def preview_paths():
     paths, msg = process_paths_request(request.json)
     if not paths: return jsonify({"status": "error", "message": msg}), 400
     return jsonify({"status": "success", "paths": paths, "origin_z": request.json.get('bbox', {}).get('origin_z')})
 
+
 @app.route('/api/plot', methods=['POST'])
 def plot_paths():
-    global plot_active, plot_paused, acked_sequences
+    global plot_active, plot_paused, acked_sequences, printer_state
 
     data = request.json
     paths, msg = process_paths_request(data)
@@ -485,17 +598,22 @@ def plot_paths():
 
     speed = int(data['speed'])
     origin_z = data.get('bbox', {}).get('origin_z')
+    z_hop = float(data.get('z_hop', 4.0))
+    bed_size = float(data.get('bed_size', 180.0))
 
     plot_active = True
     plot_paused = False
     acked_sequences.clear()
+    printer_state["progress"] = 0
 
-    threading.Thread(target=execute_plot, args=(paths, origin_z, speed)).start()
+    threading.Thread(target=execute_plot, args=(paths, origin_z, speed, z_hop, bed_size)).start()
     return jsonify({"status": "success"})
 
-def execute_plot(paths, base_z, speed):
-    global plot_active
-    hop_z = base_z + 4.0
+
+def execute_plot(paths, base_z, speed, z_hop, bed_size):
+    global plot_active, printer_state
+    hop_z = min(base_z + z_hop, bed_size)
+    mid = float(bed_size) / 2.0
 
     SAFE_Z_FEEDRATE = 1200
     SAFE_XY_FEEDRATE = 18000
@@ -504,11 +622,12 @@ def execute_plot(paths, base_z, speed):
         {"cmd": "M17", "time": 0.1},
         {"cmd": "G90", "time": 0.1},
         {"cmd": f"G0 Z90 F{SAFE_Z_FEEDRATE}", "time": 1.5},
-        {"cmd": f"G0 X90 Y90 F{SAFE_XY_FEEDRATE}", "time": 1.5},
-        {"cmd": "M400", "time": 0.1}
+        {"cmd": f"G0 X{mid:.1f} Y{mid:.1f} F{SAFE_XY_FEEDRATE}", "time": 1.5},
+        {"cmd": "M400", "time": 0.1},
+        {"cmd": "G4 P500", "time": 0.5}  # Ensure buffer stabilization before any pen drop
     ]
 
-    current_pos = {"x": 90.0, "y": 90.0}
+    current_pos = {"x": mid, "y": mid}
 
     def is_close(pA, pB):
         return abs(pA['x'] - pB['x']) < 0.1 and abs(pA['y'] - pB['y']) < 0.1
@@ -517,11 +636,25 @@ def execute_plot(paths, base_z, speed):
         p1, p2 = segment[0], segment[1]
 
         if not is_close(current_pos, p1):
-            timed_commands.append({"cmd": f"G0 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}", "time": 0.3})
+            # If moving to completely new point, ensure safe Z transit
             dist = math.hypot(p1['x'] - current_pos['x'], p1['y'] - current_pos['y'])
+
+            # Hop up securely
+            timed_commands.append({"cmd": f"G0 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}", "time": 0.3})
+
+            # Translate XY
             timed_commands.append({"cmd": f"G0 X{p1['x']:.2f} Y{p1['y']:.2f} F{SAFE_XY_FEEDRATE}",
                                    "time": (dist / (SAFE_XY_FEEDRATE / 60.0)) + 0.05})
+
+            # Secure delay BEFORE dropping down to fix first-word dragging issues
+            timed_commands.append({"cmd": "M400", "time": 0.1})
+
+            # Drop Z Down
             timed_commands.append({"cmd": f"G1 Z{base_z:.2f} F{SAFE_Z_FEEDRATE}", "time": 0.3})
+
+            # Additional wait to ensure pen firmly rests before line continues
+            timed_commands.append({"cmd": "M400", "time": 0.1})
+            timed_commands.append({"cmd": "G4 P300", "time": 0.3})
         else:
             if abs(current_pos['x'] - p1['x']) > 0.01 or abs(current_pos['y'] - p1['y']) > 0.01:
                 dist = math.hypot(p1['x'] - current_pos['x'], p1['y'] - current_pos['y'])
@@ -536,7 +669,7 @@ def execute_plot(paths, base_z, speed):
     timed_commands.extend([
         {"cmd": f"G0 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}", "time": 0.3},
         {"cmd": f"G0 Z90 F{SAFE_Z_FEEDRATE}", "time": 1.5},
-        {"cmd": f"G0 X90 Y90 F{SAFE_XY_FEEDRATE}", "time": 1.5},
+        {"cmd": f"G0 X{mid:.1f} Y{mid:.1f} F{SAFE_XY_FEEDRATE}", "time": 1.5},
         {"cmd": "M400", "time": 0.1},
         {"cmd": "M400 S1", "time": 1.0}
     ])
@@ -551,6 +684,22 @@ def execute_plot(paths, base_z, speed):
 
         chunk = timed_commands[i:i + chunk_size]
         chunk_str = "\n".join([c["cmd"] for c in chunk])
+
+        for c in reversed(chunk):
+            cmd_str = c["cmd"]
+            if "X" in cmd_str and "Y" in cmd_str:
+                parts = cmd_str.split()
+                x_val, y_val = None, None
+                for p in parts:
+                    if p.startswith("X"):
+                        x_val = float(p[1:])
+                    elif p.startswith("Y"):
+                        y_val = float(p[1:])
+                if x_val is not None and y_val is not None:
+                    printer_state["position"].update({"x": x_val, "y": y_val})
+                    break
+
+        printer_state["progress"] = int((i / max(1, len(timed_commands))) * 100)
 
         ack_time = send_gcode_chunk_reliable(chunk_str)
         chunk_duration = sum([c["time"] for c in chunk])
@@ -568,8 +717,10 @@ def execute_plot(paths, base_z, speed):
             virtual_buffer_time = 0.0
 
     plot_active = False
-    printer_state["position"].update({"x": 90, "y": 90, "z": 90})
+    printer_state["position"].update({"x": mid, "y": mid, "z": 90})
+    printer_state["progress"] = 100
+
 
 if __name__ == '__main__':
     # Debug mode is explicitly FALSE to prevent Remote Code Execution vulnerabilities
-    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+    app.run(host='0.0.0.0', port=5050, debug=False, threaded=True)
