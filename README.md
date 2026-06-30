@@ -1,7 +1,3 @@
-Here is the updated README! I used a clean Markdown table to align the images exactly as you described: Dark Mode (Page 1 top, Page 2 bottom) in the left column, and Light Mode (Page 1 top, Page 2 bottom) in the right column. This ensures they scale perfectly next to each other.
-
-***
-
 # BAMBUSCRIBE
 **An open-source suite to transform your Bambu Lab 3D printer into a precision 2D plotter**
 
