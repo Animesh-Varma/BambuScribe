@@ -1,3 +1,13 @@
+<!--
+  BambuScribe Frontend (index.html)
+
+  Provides the web-based UI for the plotter system. Features include:
+  - Material UI component bindings
+  - Three.js 3D visualizer corresponding to physical toolhead position
+  - Settings saving and restoring via LocalStorage
+  - Camera streaming viewer
+  - Interactive manual movement queue
+-->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -319,6 +329,10 @@
         const textPathsGroup = new THREE.Group();
         scene.add(textPathsGroup);
 
+        /**
+         * Closes the setup modal and configures the physical print bed constraints
+         * based on the user's selected 3D printer hardware model.
+         */
         window.selectModel = function(size) {
             BED_SIZE = size;
             document.getElementById('model-modal').style.display = 'none';
@@ -330,6 +344,9 @@
             }
         };
 
+        /**
+         * Rebuilds the Three.js 3D structural boundaries and centers the camera.
+         */
         function init3DScene() {
             if(gridHelper) scene.remove(gridHelper);
             if(wireframeBox) scene.remove(wireframeBox);
@@ -360,6 +377,9 @@
             if (bboxPoints.length === 4) triggerPreview();
         });
 
+        /**
+         * Switches the active plotting configuration context (Text vs Image)
+         */
         window.setTab = function(mode) {
             currentMode = mode;
             document.getElementById('view-text').style.display = mode === 'text' ? 'block' : 'none';
@@ -381,6 +401,7 @@
             }
         };
 
+        // UI Persistence configuration mapping via LocalStorage
         const imgSettings = JSON.parse(localStorage.getItem('plotter_img_settings')) || {};
         if (imgSettings.gap) { document.getElementById('img-gap').value = imgSettings.gap; document.getElementById('label-gap').innerText = parseFloat(imgSettings.gap).toFixed(1) + ' mm'; }
         if (imgSettings.contrast) { document.getElementById('img-contrast').value = imgSettings.contrast; document.getElementById('label-contrast').innerText = parseFloat(imgSettings.contrast).toFixed(1) + ' x'; }
@@ -427,6 +448,10 @@
             }));
         }
 
+        /**
+         * Triggers a debounced UI update for the path visualization preview.
+         * Minimizes lag during rapid text input or slider dragging.
+         */
         function autoPreview() {
             if (currentMode === 'image' && !base64Image) return;
             if (bboxPoints.length !== 4) return;
@@ -527,6 +552,10 @@
             }
         }
 
+        /**
+         * Resolves the manual movement queue in strict sequence, syncing physical timings
+         * to UI predictions to avoid spamming the printer controller logic.
+         */
         async function processQueue() {
             if (isProcessingQueue) return;
             isProcessingQueue = true;
@@ -774,6 +803,10 @@
             }
         }
 
+        /**
+         * Fetches computed line-paths from the backend and updates the
+         * 3D viewer (and 2D canvas overlay) accurately reflecting physical boundaries.
+         */
         async function triggerPreview() {
             if (isPreviewing) { pendingPreview = true; return; }
 
@@ -889,6 +922,7 @@
             document.getElementById('progress-container').style.display = 'none';
         }
 
+        // State Polling Loop to update UI coordinates/progress against physical device state.
         setInterval(async () => {
             if (!isHomed && !isProcessingQueue && currentPos.x === 0) return;
             try {

@@ -1,3 +1,12 @@
+"""
+BambuScribe Backend Application
+
+A Flask-based server that translates text and images into G-code paths.
+It communicates via MQTT with a Bambu Lab 3D printer, allowing the printer
+to be used as a 2D pen plotter. Features include manual movement, bounding
+box tracking, live camera streaming, and various image rendering techniques.
+"""
+
 from flask import Flask, render_template, request, jsonify, Response
 import paho.mqtt.client as mqtt
 import socket
@@ -10,13 +19,12 @@ import base64
 import io
 import os
 import sys
-import random
+import traceback
 import cv2
 import numpy as np
 from PIL import Image, ImageEnhance
 from HersheyFonts import HersheyFonts
 
-# --- LOAD CONFIGURATION ---
 if not os.path.exists("config.json"):
     print("Error: config.json not found! Please run 'python setup.py' first.")
     sys.exit(1)
@@ -27,7 +35,6 @@ with open("config.json", "r") as f:
 PRINTER_IP = config.get("PRINTER_IP", "")
 ACCESS_CODE = config.get("ACCESS_CODE", "")
 SERIAL_NUMBER = config.get("SERIAL_NUMBER", "")
-# --------------------------
 
 app = Flask(__name__)
 
@@ -48,6 +55,7 @@ acked_sequences = set()
 plot_active = False
 plot_paused = False
 
+# MQTT setup requiring TLS encryption for LAN Mode
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 client.username_pw_set(MQTT_USER, ACCESS_CODE)
 client.tls_set(cert_reqs=ssl.CERT_NONE, tls_version=ssl.PROTOCOL_TLS)
@@ -55,10 +63,15 @@ client.tls_insecure_set(True)
 
 
 def on_connect(client, userdata, flags, rc, properties=None):
+    """Subscribe to the printer's report topic upon successful MQTT connection."""
     client.subscribe(TOPIC_REPORT)
 
 
 def on_message(client, userdata, msg):
+    """
+    Handle incoming MQTT messages. Specifically, track sequence_ids
+    acknowledged by the printer to prevent hardware buffer overflow.
+    """
     try:
         payload = json.loads(msg.payload.decode('utf-8'))
         if "print" in payload and "sequence_id" in payload["print"]:
@@ -73,7 +86,6 @@ client.on_message = on_message
 
 print(f"\nAttempting to connect to printer at {PRINTER_IP}...")
 try:
-    # Timeout reduced to 5 seconds. If it takes longer on a local network, something is blocking it.
     client.connect(PRINTER_IP, MQTT_PORT, 5)
     client.loop_start()
     print("Successfully connected to the printer via MQTT!\n")
@@ -85,6 +97,7 @@ except Exception as e:
 
 
 def send_printer_command(cmd, param=""):
+    """Format and send a standard command dictionary via MQTT to the printer."""
     global sequence_id_counter
     sequence_id_counter += 1
     payload = {
@@ -99,14 +112,36 @@ def send_printer_command(cmd, param=""):
 
 
 def send_gcode_chunk(gcode_string):
+    """Send a fire-and-forget chunk of G-code commands."""
     formatted = "".join(f"{line.strip()} \n" for line in gcode_string.strip().split('\n') if line.strip())
     send_printer_command("gcode_line", formatted)
 
 
 def send_gcode_chunk_reliable(gcode_string):
+    """
+    Send a chunk of G-code and verify the printer acknowledges it.
+    Blocks until acknowledgement or pauses if the user stops the plot.
+    Includes a retry mechanism for dropped MQTT packets.
+
+    Returns:
+        float: Time taken (in seconds) to successfully send and verify the chunk.
+    """
     global sequence_id_counter, acked_sequences, plot_active, plot_paused
 
     formatted = "".join(f"{line.strip()} \n" for line in gcode_string.strip().split('\n') if line.strip())
+
+    sequence_id_counter += 1
+    seq_id = str(sequence_id_counter)
+
+    payload = {
+        "print": {
+            "command": "gcode_line",
+            "param": formatted,
+            "sequence_id": seq_id
+        }
+    }
+
+    payload_str = json.dumps(payload, separators=(',', ':'))
 
     while plot_active:
         while plot_paused and plot_active:
@@ -114,34 +149,33 @@ def send_gcode_chunk_reliable(gcode_string):
 
         if not plot_active: return 0
 
-        sequence_id_counter += 1
-        seq_id = str(sequence_id_counter)
-
-        payload = {
-            "print": {
-                "command": "gcode_line",
-                "param": formatted,
-                "sequence_id": seq_id
-            }
-        }
-
         send_start = time.time()
-        client.publish(TOPIC_PUBLISH, json.dumps(payload, separators=(',', ':')))
+        client.publish(TOPIC_PUBLISH, payload_str, qos=0)
 
         acked = False
-        while time.time() - send_start < 2.0:
+        while time.time() - send_start < 8.0:
+            if not plot_active: return 0
             if seq_id in acked_sequences:
                 acked = True
+                acked_sequences.discard(seq_id)
                 break
             time.sleep(0.01)
 
         if acked:
             return time.time() - send_start
 
+        print(f"[RETRY] Chunk {seq_id} dropped by printer queue. Resending chunk...")
+        time.sleep(0.5)
+
     return 0
 
 
 def generate_bambu_camera_stream():
+    """
+    Connect to the Bambu Lab proprietary camera stream port (6000).
+    Performs the 32-byte authentication handshake, decodes the MJPEG
+    byte sequence, and yields image frames to the web interface.
+    """
     auth_packet = bytearray(
         [0x40, 0x00, 0x00, 0x00, 0x00, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
     auth_packet += "bblp".encode('utf-8').ljust(32, b'\x00') + ACCESS_CODE.encode('utf-8').ljust(32, b'\x00')
@@ -191,9 +225,10 @@ def get_state():
 
 @app.route('/api/home', methods=['POST'])
 def home_axes():
+    """Send standard home G-code (G28) and center the toolhead."""
     bed_size = float(request.json.get('bed_size', 180.0)) if request.json else 180.0
     mid = bed_size / 2.0
-    send_gcode_chunk(f"G28\nG90\nG0 Z90 F600\nG0 X{mid:.1f} Y{mid:.1f} F12000")
+    send_gcode_chunk(f"G28\nG90\nG0 Z90 F600\nM400\nG0 X{mid:.1f} Y{mid:.1f} F12000\nM400")
     printer_state["is_homed"] = True
     printer_state["position"] = {"x": mid, "y": mid, "z": 90}
     printer_state["progress"] = 0
@@ -202,7 +237,9 @@ def home_axes():
 
 @app.route('/api/move', methods=['POST'])
 def move_axis():
-    if not printer_state["is_homed"]: return jsonify({"status": "error", "message": "Home first!"}), 403
+    """Move a specific axis relative to the current position, enforcing hardware limits."""
+    if not printer_state["is_homed"]:
+        return jsonify({"status": "error", "message": "Home first!"}), 403
 
     axis = request.json.get('axis').upper()
     amount = float(request.json.get('amount'))
@@ -221,13 +258,15 @@ def move_axis():
     if axis in ['X', 'Y'] and speed > 18000:
         speed = 18000
 
-    send_gcode_chunk(f"G90\nG1 {axis}{new_pos} F{speed}")
+    send_gcode_chunk(f"G90\nG1 {axis}{new_pos} F{speed}\nM400")
     return jsonify({"status": "success", "duration": (abs(amount) / (speed / 60.0)) + 0.2, "state": printer_state})
 
 
 @app.route('/api/goto_absolute', methods=['POST'])
 def goto_absolute():
-    if not printer_state["is_homed"]: return jsonify({"status": "error", "message": "Home first!"}), 403
+    """Move the toolhead to specific absolute XYZ coordinates, enforcing a safe Z-hop pathing."""
+    if not printer_state["is_homed"]:
+        return jsonify({"status": "error", "message": "Home first!"}), 403
 
     x = request.json.get('x')
     y = request.json.get('y')
@@ -249,20 +288,20 @@ def goto_absolute():
 
         safe_z = min(new_z + 2.0 * z_hop, bed_size)
 
-        # 1. Translate Z to 2x z-hop before starting XY motion
         printer_state["position"]['z'] = safe_z
         cmds.append(f"G1 Z{safe_z:.2f} F1200")
+        cmds.append("M400")
         duration += 1.0
 
-        # 2. Translate XY
         printer_state["position"]['x'] = new_x
         printer_state["position"]['y'] = new_y
         cmds.append(f"G1 X{new_x:.2f} Y{new_y:.2f} F{speed}")
+        cmds.append("M400")
         duration += 2.0
 
-        # 3. Drop Z down
         printer_state["position"]['z'] = new_z
         cmds.append(f"G1 Z{new_z:.2f} F1200")
+        cmds.append("M400")
         duration += 1.0
 
     send_gcode_chunk("\n".join(cmds))
@@ -271,6 +310,7 @@ def goto_absolute():
 
 @app.route('/api/pause', methods=['POST'])
 def pause_plot():
+    """Set flag to pause the continuous execution of path chunks."""
     global plot_paused
     plot_paused = True
     return jsonify({"status": "success"})
@@ -278,6 +318,7 @@ def pause_plot():
 
 @app.route('/api/resume', methods=['POST'])
 def resume_plot():
+    """Unset flag to resume the continuous execution of path chunks."""
     global plot_paused
     plot_paused = False
     return jsonify({"status": "success"})
@@ -285,6 +326,7 @@ def resume_plot():
 
 @app.route('/api/stop', methods=['POST'])
 def stop_plot():
+    """Hard cancel plot execution, kill motor movement, and clear progress."""
     global plot_active, printer_state
     plot_active = False
     printer_state["progress"] = 0
@@ -293,6 +335,13 @@ def stop_plot():
 
 
 def generate_text_paths(text, font_style, line_gap_mm, font_pct, min_x, max_x, min_y, max_y, auto_wrap):
+    """
+    Generate absolute path segments representing text mapped into physical millimeters,
+    utilizing the single-line vector Hershey Fonts.
+
+    Returns:
+        tuple: (list_of_paths, message_string)
+    """
     hf = HersheyFonts()
     hf.load_default_font(font_style)
 
@@ -341,8 +390,6 @@ def generate_text_paths(text, font_style, line_gap_mm, font_pct, min_x, max_x, m
             current_y -= line_gap
             continue
 
-        # If bounding box only has part of a lined section, omit it completely.
-        # This prevents printing if there's no vertical space left for the entire line depth.
         if current_y - (15 * scale) < min_y:
             current_y -= line_gap
             continue
@@ -363,9 +410,9 @@ def generate_text_paths(text, font_style, line_gap_mm, font_pct, min_x, max_x, m
 
         current_y -= line_gap
 
-    if not final_paths: return None, "Text is empty or completely exceeds bounding box bounds."
+    if not final_paths:
+        return None, "Text is empty or completely exceeds bounding box bounds."
 
-    # Check if text horizontally exceeds the bounds, throw warning!
     for segment in final_paths:
         for pt in segment:
             if pt['x'] < min_x - 0.5 or pt['x'] > max_x + 0.5 or pt['y'] < min_y - 0.5 or pt['y'] > max_y + 0.5:
@@ -375,6 +422,7 @@ def generate_text_paths(text, font_style, line_gap_mm, font_pct, min_x, max_x, m
 
 
 def get_rotated_image_pil(base64_img, contrast, rotation):
+    """Decode base64 string to a PIL Image, apply rotations, and adjust contrast."""
     image_data = base64.b64decode(base64_img.split(',')[1])
     img = Image.open(io.BytesIO(image_data)).convert('L')
     if rotation != 0:
@@ -384,8 +432,8 @@ def get_rotated_image_pil(base64_img, contrast, rotation):
 
 
 def prepare_image(img, box_w, box_h):
+    """Calculate boundaries and resize the physical pixel map based on bounding box size."""
     ppm = 4
-
     img_ratio = img.width / max(1, img.height)
     box_ratio = box_w / max(0.1, box_h)
 
@@ -403,6 +451,10 @@ def prepare_image(img, box_w, box_h):
 
 
 def gen_hatch(img, px_w, px_h, ppm, final_w, gap_mm, ox, oy):
+    """
+    Generate paths using standard line cross-hatching. Darker areas
+    generate denser, more frequent vector lines.
+    """
     final_h = px_h / ppm
     paths = []
 
@@ -446,36 +498,70 @@ def gen_hatch(img, px_w, px_h, ppm, final_w, gap_mm, ox, oy):
 
 
 def gen_tsp(img, px_w, px_h, ppm, final_w, gap_mm, ox, oy):
+    """
+    Generate paths using Stippling via a Traveling Salesman approach.
+    Points are clustered heavily in dark areas, and connected in an optimized line.
+    """
     final_h = px_h / ppm
-    num_dots = int(4000 / max(0.5, gap_mm))
+    num_dots = int(15000 / max(0.5, gap_mm))
     pts = []
     attempts = 0
-    while len(pts) < num_dots and attempts < num_dots * 10:
-        rx, ry = random.uniform(0, final_w), random.uniform(0, final_h)
+
+    # Thread-Safe RNG: Ensures the math generating visualizer paths matches physical print mathematically identically.
+    rng = np.random.default_rng(42)
+
+    while len(pts) < num_dots and attempts < num_dots * 20:
+        rx = rng.uniform(0, final_w)
+        ry = rng.uniform(0, final_h)
         px, py = int(rx * ppm), int(ry * ppm)
         if px < px_w and py < px_h:
             prob = 1.0 - (img.getpixel((px, py)) / 255.0)
-            if random.random() < prob: pts.append((rx, ry))
+            if rng.random() < prob:
+                pts.append((rx, ry))
         attempts += 1
+
     if not pts: return []
-    path = [pts.pop(0)]
-    while pts:
-        last = path[-1]
-        best_idx, best_d = 0, float('inf')
-        for i, p in enumerate(pts):
-            d = (p[0] - last[0]) ** 2 + (p[1] - last[1]) ** 2
-            if d < best_d: best_d, best_idx = d, i
-        path.append(pts.pop(best_idx))
+
+    pts_arr = np.array(pts)
+    path = [pts_arr[0]]
+
+    mask = np.ones(len(pts_arr), dtype=bool)
+    mask[0] = False
+
+    curr_pt = pts_arr[0]
+
+    for _ in range(len(pts_arr) - 1):
+        dists = (pts_arr[:, 0] - curr_pt[0]) ** 2 + (pts_arr[:, 1] - curr_pt[1]) ** 2
+        dists[~mask] = np.inf
+
+        best_idx = np.argmin(dists)
+        curr_pt = pts_arr[best_idx]
+        path.append(curr_pt)
+        mask[best_idx] = False
+
     paths = []
     for i in range(len(path) - 1):
-        p1, p2 = {"x": ox + path[i][0], "y": oy - path[i][1]}, {"x": ox + path[i + 1][0], "y": oy - path[i + 1][1]}
-        paths.append([p1, p2])
+        p1 = {"x": ox + path[i][0], "y": oy - path[i][1]}
+        p2 = {"x": ox + path[i + 1][0], "y": oy - path[i + 1][1]}
+
+        if math.hypot(p1['x'] - p2['x'], p1['y'] - p2['y']) > 3.0:
+            paths.append([p1, {"x": p1['x'] + 0.01, "y": p1['y']}])
+        else:
+            paths.append([p1, p2])
+
+    last_p = {"x": ox + path[-1][0], "y": oy - path[-1][1]}
+    paths.append([last_p, {"x": last_p['x'] + 0.01, "y": last_p['y']}])
+
     return paths
 
 
 def gen_canny(img_pil, box_w, box_h, min_x, max_x, min_y, max_y):
+    """
+    Generate paths by utilizing OpenCV's Canny Edge Detection to
+    physically trace the stark borders in an image.
+    """
     img_np = np.array(img_pil)
-    ppm = 4
+    ppm = 10
 
     img_ratio = img_np.shape[1] / max(1, img_np.shape[0])
     box_ratio = box_w / max(0.1, box_h)
@@ -491,6 +577,7 @@ def gen_canny(img_pil, box_w, box_h, min_x, max_x, min_y, max_y):
     px_h = int(final_h * ppm)
     img_resized = cv2.resize(img_np, (px_w, px_h))
     edges = cv2.Canny(img_resized, 100, 200)
+
     contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
 
     ox = min_x + (box_w - final_w) / 2.0
@@ -498,14 +585,29 @@ def gen_canny(img_pil, box_w, box_h, min_x, max_x, min_y, max_y):
 
     paths = []
     for cnt in contours:
-        for i in range(len(cnt) - 1):
-            p1 = {"x": ox + (cnt[i][0][0] / ppm), "y": oy - (cnt[i][0][1] / ppm)}
-            p2 = {"x": ox + (cnt[i + 1][0][0] / ppm), "y": oy - (cnt[i + 1][0][1] / ppm)}
-            paths.append([p1, p2])
+        if len(cnt) == 1:
+            p1 = {"x": ox + (cnt[0][0][0] / ppm), "y": oy - (cnt[0][0][1] / ppm)}
+            paths.append([p1, {"x": p1['x'] + 0.01, "y": p1['y']}])
+        else:
+            for i in range(len(cnt) - 1):
+                p1 = {"x": ox + (cnt[i][0][0] / ppm), "y": oy - (cnt[i][0][1] / ppm)}
+                p2 = {"x": ox + (cnt[i + 1][0][0] / ppm), "y": oy - (cnt[i + 1][0][1] / ppm)}
+                paths.append([p1, p2])
+
+            p_end = {"x": ox + (cnt[-1][0][0] / ppm), "y": oy - (cnt[-1][0][1] / ppm)}
+            p_start = {"x": ox + (cnt[0][0][0] / ppm), "y": oy - (cnt[0][0][1] / ppm)}
+
+            if abs(p_end['x'] - p_start['x']) > 0.001 or abs(p_end['y'] - p_start['y']) > 0.001:
+                paths.append([p_end, p_start])
+
     return paths
 
 
 def process_paths_request(data):
+    """
+    Central router that identifies the plotting target (text or image),
+    parses settings, validates bounds, and generates line paths.
+    """
     bbox = data.get('bbox')
     bed_size = float(data.get('bed_size', 180.0))
     if not bbox: return None, "Set Bounding Box (4 points) first."
@@ -566,7 +668,6 @@ def process_paths_request(data):
         paths.append([{"x": min_x, "y": max_y}, {"x": min_x, "y": min_y}])
 
     safe_paths = []
-    # Grid checks applied everywhere, capping strictly to bed size
     for seg in paths:
         x1 = max(0.0, min(bed_size, seg[0]['x']))
         y1 = max(0.0, min(bed_size, seg[0]['y']))
@@ -575,7 +676,6 @@ def process_paths_request(data):
 
         if abs(x1 - x2) < 0.001 and abs(y1 - y2) < 0.001:
             continue
-
         safe_paths.append([{"x": x1, "y": y1}, {"x": x2, "y": y2}])
 
     return safe_paths, "Success"
@@ -583,13 +683,27 @@ def process_paths_request(data):
 
 @app.route('/api/preview', methods=['POST'])
 def preview_paths():
+    """Endpoint for UI to fetch calculated paths for 3D visualizer representation."""
     paths, msg = process_paths_request(request.json)
     if not paths: return jsonify({"status": "error", "message": msg}), 400
     return jsonify({"status": "success", "paths": paths, "origin_z": request.json.get('bbox', {}).get('origin_z')})
 
 
+def execute_plot_wrapper(paths, base_z, speed, z_hop, bed_size):
+    """Execution wrapper to isolate and catch errors occurring inside the background plotting thread."""
+    global plot_active, printer_state
+    try:
+        execute_plot(paths, base_z, speed, z_hop, bed_size)
+    except Exception as e:
+        print(f"\n[FATAL ERROR] The plotting thread crashed entirely: {e}")
+        traceback.print_exc()
+        plot_active = False
+        printer_state["progress"] = 0
+
+
 @app.route('/api/plot', methods=['POST'])
 def plot_paths():
+    """Endpoint starting the plot. Kicks off the background execution thread."""
     global plot_active, plot_paused, acked_sequences, printer_state
 
     data = request.json
@@ -606,87 +720,109 @@ def plot_paths():
     acked_sequences.clear()
     printer_state["progress"] = 0
 
-    threading.Thread(target=execute_plot, args=(paths, origin_z, speed, z_hop, bed_size)).start()
+    threading.Thread(target=execute_plot_wrapper, args=(paths, origin_z, speed, z_hop, bed_size)).start()
     return jsonify({"status": "success"})
 
 
 def execute_plot(paths, base_z, speed, z_hop, bed_size):
+    """
+    Core function that calculates actual hardware kinematics, packs G-code into
+    payloads strictly formatted by network string length, and streams them while
+    maintaining exact timings so the hardware doesn't overrun.
+    """
     global plot_active, printer_state
     hop_z = min(base_z + z_hop, bed_size)
     mid = float(bed_size) / 2.0
 
-    SAFE_Z_FEEDRATE = 1200
+    SAFE_Z_FEEDRATE = 400
     SAFE_XY_FEEDRATE = 18000
+
+    # Calculate perfect physical durations to prevent script from running ahead of hardware buffer.
+    # 0.05s penalty added to EVERY move to account for mechanical acceleration profiles.
+    z_time_hop = (abs(hop_z - base_z) / (SAFE_Z_FEEDRATE / 60.0)) + 0.05
 
     timed_commands = [
         {"cmd": "M17", "time": 0.1},
         {"cmd": "G90", "time": 0.1},
-        {"cmd": f"G0 Z90 F{SAFE_Z_FEEDRATE}", "time": 1.5},
+        {"cmd": f"G1 Z90 F{SAFE_Z_FEEDRATE}", "time": 1.5},
         {"cmd": f"G0 X{mid:.1f} Y{mid:.1f} F{SAFE_XY_FEEDRATE}", "time": 1.5},
         {"cmd": "M400", "time": 0.1},
-        {"cmd": "G4 P500", "time": 0.5}  # Ensure buffer stabilization before any pen drop
+        {"cmd": "G4 P500", "time": 0.5}
     ]
 
     current_pos = {"x": mid, "y": mid}
 
     def is_close(pA, pB):
-        return abs(pA['x'] - pB['x']) < 0.1 and abs(pA['y'] - pB['y']) < 0.1
+        return abs(pA['x'] - pB['x']) < 0.03 and abs(pA['y'] - pB['y']) < 0.03
 
     for segment in paths:
         p1, p2 = segment[0], segment[1]
 
         if not is_close(current_pos, p1):
-            # If moving to completely new point, ensure safe Z transit
             dist = math.hypot(p1['x'] - current_pos['x'], p1['y'] - current_pos['y'])
 
-            # Hop up securely
-            timed_commands.append({"cmd": f"G0 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}", "time": 0.3})
-
-            # Translate XY
-            timed_commands.append({"cmd": f"G0 X{p1['x']:.2f} Y{p1['y']:.2f} F{SAFE_XY_FEEDRATE}",
-                                   "time": (dist / (SAFE_XY_FEEDRATE / 60.0)) + 0.05})
-
-            # Secure delay BEFORE dropping down to fix first-word dragging issues
             timed_commands.append({"cmd": "M400", "time": 0.1})
+            timed_commands.append({"cmd": f"G1 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}", "time": z_time_hop})
+            timed_commands.append({"cmd": "M400", "time": 0.1})
+            timed_commands.append({"cmd": "G4 P200", "time": 0.2})
 
-            # Drop Z Down
-            timed_commands.append({"cmd": f"G1 Z{base_z:.2f} F{SAFE_Z_FEEDRATE}", "time": 0.3})
+            travel_time = (dist / (SAFE_XY_FEEDRATE / 60.0)) + 0.05
+            timed_commands.append({"cmd": f"G0 X{p1['x']:.2f} Y{p1['y']:.2f} F{SAFE_XY_FEEDRATE}", "time": travel_time})
 
-            # Additional wait to ensure pen firmly rests before line continues
+            timed_commands.append({"cmd": "M400", "time": 0.1})
+            timed_commands.append({"cmd": f"G1 Z{base_z:.2f} F{SAFE_Z_FEEDRATE}", "time": z_time_hop})
             timed_commands.append({"cmd": "M400", "time": 0.1})
             timed_commands.append({"cmd": "G4 P300", "time": 0.3})
         else:
-            if abs(current_pos['x'] - p1['x']) > 0.01 or abs(current_pos['y'] - p1['y']) > 0.01:
+            if abs(current_pos['x'] - p1['x']) > 0.005 or abs(current_pos['y'] - p1['y']) > 0.005:
                 dist = math.hypot(p1['x'] - current_pos['x'], p1['y'] - current_pos['y'])
-                timed_commands.append({"cmd": f"G1 X{p1['x']:.2f} Y{p1['y']:.2f} F{speed}",
-                                       "time": (dist / (speed / 60.0)) + 0.02})
+                t = (dist / (speed / 60.0)) + 0.05
+                timed_commands.append({"cmd": f"G1 X{p1['x']:.2f} Y{p1['y']:.2f} F{speed}", "time": t})
 
         dist = math.hypot(p2['x'] - p1['x'], p2['y'] - p1['y'])
-        timed_commands.append(
-            {"cmd": f"G1 X{p2['x']:.2f} Y{p2['y']:.2f} F{speed}", "time": (dist / (speed / 60.0)) + 0.02})
+        t = (dist / (speed / 60.0)) + 0.05
+        timed_commands.append({"cmd": f"G1 X{p2['x']:.2f} Y{p2['y']:.2f} F{speed}", "time": t})
+
         current_pos = p2
 
     timed_commands.extend([
-        {"cmd": f"G0 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}", "time": 0.3},
-        {"cmd": f"G0 Z90 F{SAFE_Z_FEEDRATE}", "time": 1.5},
+        {"cmd": "M400", "time": 0.1},
+        {"cmd": f"G1 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}", "time": z_time_hop},
+        {"cmd": "M400", "time": 0.1},
+        {"cmd": "G4 P250", "time": 0.25},
+        {"cmd": f"G1 Z90 F{SAFE_Z_FEEDRATE}", "time": 1.5},
         {"cmd": f"G0 X{mid:.1f} Y{mid:.1f} F{SAFE_XY_FEEDRATE}", "time": 1.5},
         {"cmd": "M400", "time": 0.1},
         {"cmd": "M400 S1", "time": 1.0}
     ])
 
-    chunk_size = 4
+    # Dynamic Payload Packing: Groups commands by string length (800 bytes) instead of flat counts.
+    # Result: 90% fewer network calls, drastically lower risk of dropped packets, smoother hardware buffer.
+    chunks = []
+    current_chunk_cmds = []
+    current_chunk_time = 0.0
+
+    for c in timed_commands:
+        current_chunk_cmds.append(c["cmd"])
+        current_chunk_time += c["time"]
+
+        if len("\n".join(current_chunk_cmds)) > 800:
+            chunks.append({"str": "\n".join(current_chunk_cmds), "time": current_chunk_time})
+            current_chunk_cmds = []
+            current_chunk_time = 0.0
+
+    if current_chunk_cmds:
+        chunks.append({"str": "\n".join(current_chunk_cmds), "time": current_chunk_time})
+
     virtual_buffer_time = 0.0
     MAX_BUFFER_TIME = 2.0
 
-    for i in range(0, len(timed_commands), chunk_size):
+    for i, chunk in enumerate(chunks):
         if not plot_active:
             break
 
-        chunk = timed_commands[i:i + chunk_size]
-        chunk_str = "\n".join([c["cmd"] for c in chunk])
-
-        for c in reversed(chunk):
-            cmd_str = c["cmd"]
+        # Check the last command in the chunk to update the web visualizer state safely
+        for cmd_str in reversed(chunk["str"].split('\n')):
             if "X" in cmd_str and "Y" in cmd_str:
                 parts = cmd_str.split()
                 x_val, y_val = None, None
@@ -699,12 +835,11 @@ def execute_plot(paths, base_z, speed, z_hop, bed_size):
                     printer_state["position"].update({"x": x_val, "y": y_val})
                     break
 
-        printer_state["progress"] = int((i / max(1, len(timed_commands))) * 100)
+        printer_state["progress"] = int((i / max(1, len(chunks))) * 100)
 
-        ack_time = send_gcode_chunk_reliable(chunk_str)
-        chunk_duration = sum([c["time"] for c in chunk])
+        ack_time = send_gcode_chunk_reliable(chunk["str"])
 
-        virtual_buffer_time += chunk_duration
+        virtual_buffer_time += chunk["time"]
         virtual_buffer_time -= ack_time
 
         if virtual_buffer_time > MAX_BUFFER_TIME:
@@ -722,5 +857,4 @@ def execute_plot(paths, base_z, speed, z_hop, bed_size):
 
 
 if __name__ == '__main__':
-    # Debug mode is explicitly FALSE to prevent Remote Code Execution vulnerabilities
     app.run(host='0.0.0.0', port=5050, debug=False, threaded=True)

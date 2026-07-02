@@ -1,3 +1,13 @@
+"""
+BambuScribe Setup Script
+
+This script handles the initial configuration for BambuScribe. It performs:
+1. Prompting the user for their Bambu Lab printer credentials.
+2. Saving the credentials securely to 'config.json'.
+3. Creating a Python virtual environment (if one does not exist).
+4. Installing required dependencies into the virtual environment.
+"""
+
 import os
 import sys
 import subprocess
@@ -7,11 +17,13 @@ import json
 
 
 def main():
+    """
+    Main execution routine for configuring credentials and setting up the local Python environment.
+    """
     print("========================================")
     print("           BambuScribe Setup            ")
     print("========================================")
 
-    # 1. Pre-requisite check
     print("\n[ATTENTION REQUIRED]")
     print("Before we begin, please ensure that your printer has both:")
     print("  1. LAN Only Mode turned ON")
@@ -19,13 +31,11 @@ def main():
     print("You can find these settings in the Network section of your printer's screen.")
     input("Press Enter once you have confirmed both are turned ON... ")
 
-    # 2. Ask the user for printer credentials
     print("\n--- Printer Credentials ---")
     printer_ip = input("Enter Printer IP Address (e.g., 192.168.1.50): ").strip()
     access_code = input("Enter Printer Access Code (from LAN Only mode): ").strip()
     serial_number = input("Enter Printer Serial Number: ").strip()
 
-    # 3. Save credentials securely to config.json
     print("\nConfiguring your credentials...")
     config_data = {
         "PRINTER_IP": printer_ip,
@@ -41,7 +51,7 @@ def main():
         print(f"\n[ERROR] Failed to write config.json: {e}")
         sys.exit(1)
 
-    # 4. Check if we are already in a virtual environment or if one exists
+    # Determine if the script is already running inside an active virtual environment
     in_venv = sys.prefix != sys.base_prefix or os.environ.get('VIRTUAL_ENV') is not None
     venv_dir = "venv"
     venv_exists = os.path.isdir(venv_dir)
@@ -61,12 +71,12 @@ def main():
             python_exe = os.path.join(venv_dir, "bin", "python")
             activate_cmd = f"source {venv_dir}/bin/activate"
     else:
-        # Create it only if it doesn't exist at all
         print(f"\nCreating a virtual environment in '{venv_dir}'...")
         builder = venv.EnvBuilder(with_pip=True)
         builder.create(venv_dir)
         do_install = True
 
+        # Assign paths based on the OS structure of standard venv folders
         if platform.system() == "Windows":
             python_exe = os.path.join(venv_dir, "Scripts", "python.exe")
             pip_exe = os.path.join(venv_dir, "Scripts", "pip.exe")
@@ -76,7 +86,6 @@ def main():
             pip_exe = os.path.join(venv_dir, "bin", "pip")
             activate_cmd = f"source {venv_dir}/bin/activate"
 
-    # 5. Install dependencies ONLY if we just created the venv
     if do_install:
         packages = ["Flask", "paho-mqtt>=2.0.0", "opencv-python", "numpy", "Pillow", "Hershey-Fonts"]
         print("\nInstalling dependencies inside the virtual environment (this may take a minute)...")
@@ -88,7 +97,6 @@ def main():
             print("\n[ERROR] Failed to install one or more dependencies. Please check your internet connection.")
             sys.exit(1)
 
-    # 6. Display completion instructions and offer to run
     print("\n========================================")
     print("            Setup Complete!             ")
     print("========================================")
