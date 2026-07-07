@@ -100,6 +100,18 @@
         </div>
     </div>
 
+    <div id="plot-method-modal" style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; display:none; align-items:center; justify-content:center;">
+        <div style="background:var(--surface-color); padding:32px; border-radius:24px; text-align:center; max-width:400px; box-shadow: 0 8px 24px rgba(0,0,0,0.2);">
+            <h2 style="margin-top:0;">Select Plotting Method</h2>
+            <p style="margin-bottom:24px; color:var(--text-color);">Stream via WiFi for live control, or send the entire file to the printer's SD card to run autonomously.</p>
+            <div style="display:flex; flex-direction:column; gap:16px;">
+                <md-filled-button onclick="startPlot('send')"><md-icon slot="icon">sd_card</md-icon> Send to SD Card</md-filled-button>
+                <md-filled-tonal-button onclick="startPlot('stream')"><md-icon slot="icon">wifi</md-icon> Stream via WiFi</md-filled-tonal-button>
+                <md-outlined-button onclick="closePlotModal()">Cancel</md-outlined-button>
+            </div>
+        </div>
+    </div>
+
     <div class="header">
         <h1>BambuScribe</h1>
         <md-icon-button id="theme-toggle"><md-icon>dark_mode</md-icon></md-icon-button>
@@ -258,8 +270,7 @@
 
             <div id="progress-container" style="display:none; margin-top: 16px; flex-direction: column; gap: 8px;">
                 <div style="display:flex; justify-content:space-between; font-weight:500;">
-                    <span>Plotting Progress</span>
-                    <span id="progress-text">0%</span>
+                    <span id="progress-text">Status: 0%</span>
                 </div>
                 <div style="width:100%; background:var(--canvas-bg); height:8px; border-radius:4px; overflow:hidden;">
                     <div id="progress-bar" style="width:0%; background:var(--md-sys-color-primary); height:100%; transition:width 0.3s;"></div>
@@ -878,33 +889,44 @@
 
         document.getElementById('btn-preview').addEventListener('click', triggerPreview);
 
-        document.getElementById('btn-plot').addEventListener('click', async () => {
+        document.getElementById('btn-plot').addEventListener('click', () => {
             if(!confirm("Ready to draw? Ensure pen is lowered and paper is secure!")) return;
+            document.getElementById('plot-method-modal').style.display = 'flex';
+        });
 
+        window.closePlotModal = function() {
+            document.getElementById('plot-method-modal').style.display = 'none';
+        }
+
+        window.startPlot = async function(method) {
+            document.getElementById('plot-method-modal').style.display = 'none';
             document.getElementById('btn-plot').style.display = 'none';
             document.getElementById('btn-preview').style.display = 'none';
-            document.getElementById('btn-pause').style.display = 'inline-flex';
+
+            // Allow stopping hardware regardless of execution method
             document.getElementById('btn-estop').style.display = 'inline-flex';
+            const endpoint = method === 'stream' ? '/api/plot' : '/api/plot_sd';
 
-            const res = await fetch('/api/plot', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(getPayload()) });
-            const data = await res.json();
+            try {
+                const res = await fetch(endpoint, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(getPayload()) });
+                const data = await res.json();
 
-            if (data.status !== 'success') {
-                showWarning(data.message);
+                if (data.status !== 'success') {
+                    showWarning(data.message);
+                    resetPlottingUI();
+                }
+            } catch(e) {
+                showWarning("Error: " + e.message);
                 resetPlottingUI();
             }
-        });
+        };
 
         document.getElementById('btn-pause').addEventListener('click', async () => {
             await fetch('/api/pause', { method: 'POST' });
-            document.getElementById('btn-pause').style.display = 'none';
-            document.getElementById('btn-resume').style.display = 'inline-flex';
         });
 
         document.getElementById('btn-resume').addEventListener('click', async () => {
             await fetch('/api/resume', { method: 'POST' });
-            document.getElementById('btn-resume').style.display = 'none';
-            document.getElementById('btn-pause').style.display = 'inline-flex';
         });
 
         document.getElementById('btn-estop').addEventListener('click', async () => {
@@ -922,23 +944,48 @@
             document.getElementById('progress-container').style.display = 'none';
         }
 
-        // State Polling Loop to update UI coordinates/progress against physical device state.
+        // State Polling Loop to track progress and sync physical status intelligently.
         setInterval(async () => {
             if (!isHomed && !isProcessingQueue && currentPos.x === 0) return;
             try {
                 const res = await fetch('/api/state');
                 const data = await res.json();
+
                 if (data.is_homed) {
+                    // Update positional tracker
                     if (!isProcessingQueue && manualQueue.length === 0) {
                         update3DVisualizer(data.position.x, data.position.y, data.position.z);
                     }
-                    if (document.getElementById('btn-pause').style.display !== 'none' || document.getElementById('btn-resume').style.display !== 'none') {
+
+                    // Unified Tracker updating
+                    if (data.status !== "Idle") {
                         document.getElementById('progress-container').style.display = 'flex';
                         document.getElementById('progress-bar').style.width = data.progress + '%';
-                        document.getElementById('progress-text').innerText = data.progress + '%';
-                        if (data.progress === 100) resetPlottingUI();
+                        document.getElementById('btn-estop').style.display = 'inline-flex';
+
+                        if (data.status === "Uploading") {
+                            document.getElementById('progress-text').innerText = `Uploading to SD Card... ${data.progress}%`;
+                            document.getElementById('btn-pause').style.display = 'none';
+                            document.getElementById('btn-resume').style.display = 'none';
+                        } else {
+                            document.getElementById('progress-text').innerText = data.status === "Printing SD"
+                                ? `Autonomous SD Print... ${data.progress}%`
+                                : `Streaming Plot Over WiFi... ${data.progress}%`;
+
+                            if (data.is_paused) {
+                                document.getElementById('btn-pause').style.display = 'none';
+                                document.getElementById('btn-resume').style.display = 'inline-flex';
+                            } else {
+                                document.getElementById('btn-pause').style.display = 'inline-flex';
+                                document.getElementById('btn-resume').style.display = 'none';
+                            }
+                        }
                     } else {
+                        // Plotting loop is Idle. Clear dynamic layout changes if they linger.
                         document.getElementById('progress-container').style.display = 'none';
+                        if (document.getElementById('btn-plot').style.display === 'none') {
+                            resetPlottingUI();
+                        }
                     }
                 }
             } catch(e) {}
