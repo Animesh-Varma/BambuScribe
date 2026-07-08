@@ -319,7 +319,7 @@ def home_axes():
     """Send standard home G-code (G28) and center the toolhead."""
     bed_size = float(request.json.get('bed_size', 180.0)) if request.json else 180.0
     mid = bed_size / 2.0
-    send_gcode_chunk(f"G28\nG90\nG0 Z90 F600\nM400\nG0 X{mid:.1f} Y{mid:.1f} F12000\nM400")
+    send_gcode_chunk(f"G28\nG90\nG0 Z90 F1200\nM400\nG0 X{mid:.1f} Y{mid:.1f} F18000\nM400")
     printer_state["is_homed"] = True
     printer_state["position"] = {"x": mid, "y": mid, "z": 90}
     printer_state["progress"] = 0
@@ -368,6 +368,8 @@ def goto_absolute():
 
     cmds = ["G90"]
     duration = 0.2
+
+    speed = min(float(speed), 18000)
 
     if x is not None and y is not None and z is not None:
         new_x, new_y, new_z = float(x), float(y), float(z)
@@ -786,8 +788,9 @@ def generate_full_gcode(paths, base_z, speed, z_hop, bed_size):
     """Calculates the complete static G-Code payload optimized for autonomous SD card printing."""
     hop_z = min(base_z + z_hop, bed_size)
     mid = float(bed_size) / 2.0
-    SAFE_Z_FEEDRATE = 400
-    SAFE_XY_FEEDRATE = 18000
+
+    SAFE_Z_FEEDRATE = min(speed, 1200)
+    SAFE_XY_FEEDRATE = min(speed, 18000)
 
     gcode = [
         "M104 S0 ; turn off nozzle heater",
@@ -993,8 +996,8 @@ def execute_plot(paths, base_z, speed, z_hop, bed_size):
     hop_z = min(base_z + z_hop, bed_size)
     mid = float(bed_size) / 2.0
 
-    SAFE_Z_FEEDRATE = 400
-    SAFE_XY_FEEDRATE = 18000
+    SAFE_Z_FEEDRATE = min(speed, 1200)
+    SAFE_XY_FEEDRATE = min(speed, 18000)
 
     z_time_hop = (abs(hop_z - base_z) / (SAFE_Z_FEEDRATE / 60.0)) + 0.05
 
@@ -1003,8 +1006,7 @@ def execute_plot(paths, base_z, speed, z_hop, bed_size):
         {"cmd": "G90", "time": 0.1},
         {"cmd": f"G1 Z90 F{SAFE_Z_FEEDRATE}", "time": 1.5},
         {"cmd": f"G0 X{mid:.1f} Y{mid:.1f} F{SAFE_XY_FEEDRATE}", "time": 1.5},
-        {"cmd": "M400", "time": 0.1},
-        {"cmd": "G4 P500", "time": 0.5}
+        {"cmd": "M400", "time": 0.1}
     ]
 
     current_pos = {"x": mid, "y": mid}
@@ -1018,18 +1020,16 @@ def execute_plot(paths, base_z, speed, z_hop, bed_size):
         if not is_close(current_pos, p1):
             dist = math.hypot(p1['x'] - current_pos['x'], p1['y'] - current_pos['y'])
 
-            timed_commands.append({"cmd": "M400", "time": 0.1})
+            timed_commands.append({"cmd": "M400", "time": 0.05})
             timed_commands.append({"cmd": f"G1 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}", "time": z_time_hop})
-            timed_commands.append({"cmd": "M400", "time": 0.1})
-            timed_commands.append({"cmd": "G4 P200", "time": 0.2})
+            timed_commands.append({"cmd": "M400", "time": 0.05})
 
             travel_time = (dist / (SAFE_XY_FEEDRATE / 60.0)) + 0.05
             timed_commands.append({"cmd": f"G0 X{p1['x']:.2f} Y{p1['y']:.2f} F{SAFE_XY_FEEDRATE}", "time": travel_time})
 
-            timed_commands.append({"cmd": "M400", "time": 0.1})
+            timed_commands.append({"cmd": "M400", "time": 0.05})
             timed_commands.append({"cmd": f"G1 Z{base_z:.2f} F{SAFE_Z_FEEDRATE}", "time": z_time_hop})
-            timed_commands.append({"cmd": "M400", "time": 0.1})
-            timed_commands.append({"cmd": "G4 P300", "time": 0.3})
+            timed_commands.append({"cmd": "M400", "time": 0.05})
         else:
             if abs(current_pos['x'] - p1['x']) > 0.005 or abs(current_pos['y'] - p1['y']) > 0.005:
                 dist = math.hypot(p1['x'] - current_pos['x'], p1['y'] - current_pos['y'])
@@ -1046,7 +1046,6 @@ def execute_plot(paths, base_z, speed, z_hop, bed_size):
         {"cmd": "M400", "time": 0.1},
         {"cmd": f"G1 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}", "time": z_time_hop},
         {"cmd": "M400", "time": 0.1},
-        {"cmd": "G4 P250", "time": 0.25},
         {"cmd": f"G1 Z90 F{SAFE_Z_FEEDRATE}", "time": 1.5},
         {"cmd": f"G0 X{mid:.1f} Y{mid:.1f} F{SAFE_XY_FEEDRATE}", "time": 1.5},
         {"cmd": "M400", "time": 0.1},

@@ -143,8 +143,17 @@
             </div>
 
             <div style="display: flex; gap: 10px; align-items: center; margin-top: 10px; margin-bottom: 10px;">
-                <md-outlined-text-field id="manual-speed" type="number" value="12000" label="XY Speed" style="flex: 1;"></md-outlined-text-field>
-                <md-outlined-text-field id="manual-speed-z" type="number" value="12000" label="Z Speed" style="flex: 1;"></md-outlined-text-field>
+                <md-outlined-select id="manual-speed" label="Manual XY Speed" style="flex: 1;">
+                    <md-select-option value="5000"><div slot="headline">5000 mm/min</div></md-select-option>
+                    <md-select-option value="12000" selected><div slot="headline">12000 mm/min</div></md-select-option>
+                    <md-select-option value="18000"><div slot="headline">18000 mm/min (Max)</div></md-select-option>
+                </md-outlined-select>
+
+                <md-outlined-select id="manual-speed-z" label="Manual Z Speed" style="flex: 1;">
+                    <md-select-option value="400"><div slot="headline">400 mm/min</div></md-select-option>
+                    <md-select-option value="800"><div slot="headline">800 mm/min</div></md-select-option>
+                    <md-select-option value="1200" selected><div slot="headline">1200 mm/min (Max)</div></md-select-option>
+                </md-outlined-select>
             </div>
 
             <div class="step-selector">
@@ -200,10 +209,12 @@
                     </md-outlined-select>
                     <md-outlined-text-field id="doc-spacing" type="number" label="Line Gap (mm)" value="10"></md-outlined-text-field>
                     <md-outlined-text-field id="doc-size" type="number" label="Scale (%)" value="100"></md-outlined-text-field>
+
                     <md-outlined-select id="doc-speed" label="Plot Speed">
                         <md-select-option value="2000"><div slot="headline">Slow (2000)</div></md-select-option>
                         <md-select-option value="5000" selected><div slot="headline">Normal (5000)</div></md-select-option>
                         <md-select-option value="12000"><div slot="headline">Fast (12000)</div></md-select-option>
+                        <md-select-option value="18000"><div slot="headline">Max (18000)</div></md-select-option>
                     </md-outlined-select>
                 </div>
                 <div style="margin-bottom: 16px; display: flex; gap: 24px;">
@@ -261,9 +272,12 @@
                         <md-outlined-text-field id="img-offset-x" type="number" label="Offset X (mm)" value="0" style="flex:1;"></md-outlined-text-field>
                         <md-outlined-text-field id="img-offset-y" type="number" label="Offset Y (mm)" value="0" style="flex:1;"></md-outlined-text-field>
                     </div>
+
                     <md-outlined-select id="img-speed" label="Plot Speed">
+                        <md-select-option value="2000"><div slot="headline">Slow (2000)</div></md-select-option>
                         <md-select-option value="5000"><div slot="headline">Normal (5000)</div></md-select-option>
                         <md-select-option value="12000" selected><div slot="headline">Fast (12000)</div></md-select-option>
+                        <md-select-option value="18000"><div slot="headline">Max (18000)</div></md-select-option>
                     </md-outlined-select>
                 </div>
             </div>
