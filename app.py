@@ -897,7 +897,7 @@ def execute_plot_sd_wrapper(gcode_str):
 
         print(f"[SD Plotting] Upload complete. Initiating {filename} on printer...")
         printer_state["status"] = "Starting Print"
-        printer_state["progress"] = 100
+        printer_state["progress"] = 99
 
         time.sleep(3.0)
         

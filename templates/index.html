@@ -915,10 +915,34 @@
             document.getElementById('btn-plot').focus();
         }
 
+        function trapFocus(modal, e) {
+            const focusable = modal.querySelectorAll('md-filled-button, md-filled-tonal-button, md-outlined-button');
+            if (focusable.length === 0) return;
+
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+
+            if (e.key === 'Tab') {
+                if (e.shiftKey && document.activeElement === first) {
+                    last.focus();
+                    e.preventDefault();
+                } else if (!e.shiftKey && document.activeElement === last) {
+                    first.focus();
+                    e.preventDefault();
+                }
+            }
+        }
+
         document.getElementById('plot-method-modal').addEventListener('keydown', (e) => {
             if (e.key === 'Escape') {
                 closePlotModal();
+            } else {
+                trapFocus(document.getElementById('plot-method-modal'), e);
             }
+        });
+
+        document.getElementById('model-modal').addEventListener('keydown', (e) => {
+            trapFocus(document.getElementById('model-modal'), e);
         });
 
         window.startPlot = async function(method) {
