@@ -85,7 +85,7 @@ def on_message(client, userdata, msg):
                 acked_sequences.add(seq_id)
 
             # Monitor autonomous SD card printing state
-            if printer_state.get("status") == "Printing SD":
+            if printer_state.get("status") in ["Printing SD", "Starting Print"]:
                 if "mc_percent" in p_data:
                     printer_state["progress"] = p_data["mc_percent"]
                     if p_data["mc_percent"] == 100:
@@ -94,13 +94,16 @@ def on_message(client, userdata, msg):
 
                 if "gcode_state" in p_data:
                     state = p_data["gcode_state"]
-                    if state in ["FINISH", "FAILED"]:
-                        printer_state["status"] = "Idle"
+                    if state == "FINISH" and printer_state.get("progress", 0) > 0:
                         plot_active = False
                         printer_state["progress"] = 100
+                        printer_state["status"] = "Idle"
+                    elif state == "FAILED":
+                        plot_active = False
+                        printer_state["progress"] = 100
+                        printer_state["status"] = "Failed"
     except Exception:
         pass
-
 
 client.on_connect = on_connect
 client.on_message = on_message
@@ -333,16 +336,20 @@ def move_axis():
         return jsonify({"status": "error", "message": "Home first!"}), 403
 
     axis = request.json.get('axis').upper()
-    amount = float(request.json.get('amount'))
-    speed = request.json.get('speed')
-    bed_size = float(request.json.get('bed_size', 180.0))
+    try:
+        amount = float(request.json.get('amount'))
+        speed = float(request.json.get('speed', 12000))
+        bed_size = float(request.json.get('bed_size', 180.0))
+        if speed <= 0 or bed_size <= 0:
+            return jsonify({"status": "error", "message": "Invalid parameters"}), 400
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "Invalid parameter types"}), 400
 
     new_pos = printer_state["position"][axis.lower()] + amount
     if new_pos < 0 or new_pos > bed_size:
         return jsonify({"status": "error", "message": f"HARD STOP: {axis} {new_pos} out of bounds."}), 400
 
     printer_state["position"][axis.lower()] = new_pos
-    speed = float(speed) if speed else 12000
 
     if axis == 'Z' and speed > 1200:
         speed = 1200
@@ -359,17 +366,21 @@ def goto_absolute():
     if not printer_state["is_homed"]:
         return jsonify({"status": "error", "message": "Home first!"}), 403
 
+    try:
+        speed = min(float(request.json.get('speed', 12000)), 18000)
+        bed_size = float(request.json.get('bed_size', 180.0))
+        z_hop = float(request.json.get('z_hop', 4.0))
+        if speed <= 0 or z_hop < 0 or bed_size <= 0:
+            return jsonify({"status": "error", "message": "Invalid parameters"}), 400
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "Invalid parameter types"}), 400
+
     x = request.json.get('x')
     y = request.json.get('y')
     z = request.json.get('z')
-    speed = request.json.get('speed', 12000)
-    bed_size = float(request.json.get('bed_size', 180.0))
-    z_hop = float(request.json.get('z_hop', 4.0))
 
     cmds = ["G90"]
     duration = 0.2
-
-    speed = min(float(speed), 18000)
 
     if x is not None and y is not None and z is not None:
         new_x, new_y, new_z = float(x), float(y), float(z)
@@ -789,8 +800,9 @@ def generate_full_gcode(paths, base_z, speed, z_hop, bed_size):
     hop_z = min(base_z + z_hop, bed_size)
     mid = float(bed_size) / 2.0
 
-    SAFE_Z_FEEDRATE = min(speed, 1200)
-    SAFE_XY_FEEDRATE = min(speed, 18000)
+    speed = int(speed)
+    SAFE_Z_FEEDRATE = int(min(speed, 1200))
+    SAFE_XY_FEEDRATE = int(min(speed, 18000))
 
     gcode = [
         "M104 S0 ; turn off nozzle heater",
@@ -840,7 +852,7 @@ def generate_full_gcode(paths, base_z, speed, z_hop, bed_size):
 
 def execute_plot_sd_wrapper(gcode_str):
     """Background wrapper for generating a 3MF, uploading it, and initiating a full SD print."""
-    global plot_active, printer_state, sequence_id_counter
+    global plot_active, printer_state, sequence_id_counter, acked_sequences
     try:
         print("[SD Plotting] Packaging G-code into Bambu 3MF archive...")
         # Force standard UNIX line endings which Bambu expects natively
@@ -884,15 +896,21 @@ def execute_plot_sd_wrapper(gcode_str):
             return
 
         print(f"[SD Plotting] Upload complete. Initiating {filename} on printer...")
-        printer_state["status"] = "Printing SD"
-        printer_state["progress"] = 0
+        printer_state["status"] = "Starting Print"
+        printer_state["progress"] = 100
 
         time.sleep(3.0)
+        
+        # Verify active atomic state after thread sleeping
+        if not plot_active:
+            print("[SD Plotting] Plot aborted before triggering print.")
+            return
 
         sequence_id_counter += 1
+        seq_id = str(sequence_id_counter)
         payload = {
             "print": {
-                "sequence_id": str(sequence_id_counter),
+                "sequence_id": seq_id,
                 "command": "project_file",
                 "param": "Metadata/plate_1.gcode",
                 "project_id": "0",
@@ -912,7 +930,25 @@ def execute_plot_sd_wrapper(gcode_str):
             }
         }
         client.publish(TOPIC_PUBLISH, json.dumps(payload, separators=(',', ':')))
-        print("[SD Plotting] Print command successfully sent to printer!")
+        print("[SD Plotting] Print command sent. Waiting for acknowledgment...")
+
+        wait_start = time.time()
+        acked = False
+        while time.time() - wait_start < 10.0:
+            if not plot_active:
+                return
+            if seq_id in acked_sequences:
+                acked = True
+                acked_sequences.discard(seq_id)
+                break
+            time.sleep(0.1)
+
+        if not acked:
+            print("[WARNING] No acknowledgment from printer for SD print. It may have started anyway.")
+            
+        printer_state["status"] = "Printing SD"
+        printer_state["progress"] = 0
+        print("[SD Plotting] Print job is active!")
 
     except Exception as e:
         print(f"\n[SD Plotting Error]: {e}")
@@ -930,10 +966,17 @@ def plot_paths_sd():
     paths, msg = process_paths_request(data)
     if not paths: return jsonify({"status": "error", "message": msg}), 400
 
-    speed = int(data['speed'])
-    origin_z = data.get('bbox', {}).get('origin_z')
-    z_hop = float(data.get('z_hop', 4.0))
-    bed_size = float(data.get('bed_size', 180.0))
+    try:
+        speed = float(data.get('speed', 12000))
+        z_hop = float(data.get('z_hop', 4.0))
+        bed_size = float(data.get('bed_size', 180.0))
+        bbox = data.get('bbox', {})
+        origin_z = float(bbox.get('origin_z', 0.0)) if bbox else 0.0
+        
+        if speed <= 0 or z_hop < 0 or bed_size <= 0 or not (0 <= origin_z <= bed_size):
+            return jsonify({"status": "error", "message": "Invalid plotting parameters provided."}), 400
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "Invalid parameter types."}), 400
 
     try:
         gcode_str = generate_full_gcode(paths, origin_z, speed, z_hop, bed_size)
@@ -971,10 +1014,17 @@ def plot_paths():
     paths, msg = process_paths_request(data)
     if not paths: return jsonify({"status": "error", "message": msg}), 400
 
-    speed = int(data['speed'])
-    origin_z = data.get('bbox', {}).get('origin_z')
-    z_hop = float(data.get('z_hop', 4.0))
-    bed_size = float(data.get('bed_size', 180.0))
+    try:
+        speed = float(data.get('speed', 12000))
+        z_hop = float(data.get('z_hop', 4.0))
+        bed_size = float(data.get('bed_size', 180.0))
+        bbox = data.get('bbox', {})
+        origin_z = float(bbox.get('origin_z', 0.0)) if bbox else 0.0
+        
+        if speed <= 0 or z_hop < 0 or bed_size <= 0 or not (0 <= origin_z <= bed_size):
+            return jsonify({"status": "error", "message": "Invalid plotting parameters provided."}), 400
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "Invalid parameter types."}), 400
 
     plot_active = True
     plot_paused = False
