@@ -1052,6 +1052,10 @@
             } catch(e) {}
         }, 1000);
 
+        if (document.getElementById('model-modal').style.display !== 'none') {
+            setTimeout(() => document.querySelector('#model-modal md-filled-button').focus(), 50);
+        }
+
         updateBBoxDots();
         renderBBoxList();
         window.setTab(currentMode);

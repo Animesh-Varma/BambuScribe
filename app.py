@@ -953,8 +953,11 @@ def execute_plot_sd_wrapper(gcode_str):
     except Exception as e:
         print(f"\n[SD Plotting Error]: {e}")
         traceback.print_exc()
+        if plot_active:
+            printer_state["status"] = "Failed"
+        else:
+            printer_state["status"] = "Idle"
         plot_active = False
-        printer_state["status"] = "Idle"
         printer_state["progress"] = 0
 
 
@@ -966,8 +969,11 @@ def plot_paths_sd():
     paths, msg = process_paths_request(data)
     if not paths: return jsonify({"status": "error", "message": msg}), 400
 
+    if plot_active:
+        return jsonify({"status": "error", "message": "A plot is already running!"}), 400
+
     try:
-        speed = float(data.get('speed', 12000))
+        speed = min(float(data.get('speed', 12000)), 18000.0)
         z_hop = float(data.get('z_hop', 4.0))
         bed_size = float(data.get('bed_size', 180.0))
         bbox = data.get('bbox', {})
@@ -1014,6 +1020,9 @@ def plot_paths():
     paths, msg = process_paths_request(data)
     if not paths: return jsonify({"status": "error", "message": msg}), 400
 
+    if plot_active:
+        return jsonify({"status": "error", "message": "A plot is already running!"}), 400
+
     try:
         speed = float(data.get('speed', 12000))
         z_hop = float(data.get('z_hop', 4.0))
@@ -1043,6 +1052,7 @@ def execute_plot(paths, base_z, speed, z_hop, bed_size):
     maintaining exact timings so the hardware doesn't overrun.
     """
     global plot_active, printer_state
+    speed = int(speed)
     hop_z = min(base_z + z_hop, bed_size)
     mid = float(bed_size) / 2.0
 
