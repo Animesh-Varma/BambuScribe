@@ -20,8 +20,11 @@ import io
 import os
 import sys
 import traceback
+import ftplib
 import cv2
 import numpy as np
+import zipfile
+import hashlib
 from PIL import Image, ImageEnhance
 from HersheyFonts import HersheyFonts
 
@@ -46,7 +49,8 @@ TOPIC_REPORT = f"device/{SERIAL_NUMBER}/report"
 printer_state = {
     "is_homed": False,
     "position": {"x": 90, "y": 90, "z": 90},
-    "progress": 0
+    "progress": 0,
+    "status": "Idle"
 }
 
 sequence_id_counter = 2000
@@ -69,17 +73,37 @@ def on_connect(client, userdata, flags, rc, properties=None):
 
 def on_message(client, userdata, msg):
     """
-    Handle incoming MQTT messages. Specifically, track sequence_ids
-    acknowledged by the printer to prevent hardware buffer overflow.
+    Handle incoming MQTT messages to track sequence_ids and SD print progress.
     """
+    global printer_state, plot_active
     try:
         payload = json.loads(msg.payload.decode('utf-8'))
-        if "print" in payload and "sequence_id" in payload["print"]:
-            seq_id = str(payload["print"]["sequence_id"])
-            acked_sequences.add(seq_id)
+        if "print" in payload:
+            p_data = payload["print"]
+            if "sequence_id" in p_data:
+                seq_id = str(p_data["sequence_id"])
+                acked_sequences.add(seq_id)
+
+            # Monitor autonomous SD card printing state
+            if printer_state.get("status") in ["Printing SD", "Starting Print"]:
+                if "mc_percent" in p_data:
+                    printer_state["progress"] = p_data["mc_percent"]
+                    if p_data["mc_percent"] == 100:
+                        printer_state["status"] = "Idle"
+                        plot_active = False
+
+                if "gcode_state" in p_data:
+                    state = p_data["gcode_state"]
+                    if state == "FINISH" and printer_state.get("progress", 0) > 0:
+                        plot_active = False
+                        printer_state["progress"] = 100
+                        printer_state["status"] = "Idle"
+                    elif state == "FAILED":
+                        plot_active = False
+                        printer_state["progress"] = 100
+                        printer_state["status"] = "Failed"
     except Exception:
         pass
-
 
 client.on_connect = on_connect
 client.on_message = on_message
@@ -94,6 +118,73 @@ except Exception as e:
     print(f"Error details: {e}")
     print("The web server will still start, but plotting commands will fail until the printer is reachable.")
     print("Check if the printer is awake, the IP is correct, and LAN Only Mode is active.\n")
+
+
+# Implicit FTPS Class definition for Bambu Printers (Port 990)
+class ImplicitFTP_TLS(ftplib.FTP_TLS):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def connect(self, host='', port=0, timeout=-999, source_address=None):
+        if host != '': self.host = host
+        if port > 0: self.port = port
+        if timeout != -999: self.timeout = timeout
+        if source_address is not None: self.source_address = source_address
+
+        timeout_val = getattr(self, 'timeout', 60)
+        if timeout_val is not None and not timeout_val: raise ValueError('Timeout must be greater than 0')
+
+        self.sock = socket.create_connection((self.host, self.port), timeout_val, getattr(self, 'source_address', None))
+        self.af = self.sock.family
+        if getattr(self, 'context', None) is None:
+            self.context = ssl.create_default_context()
+            self.context.check_hostname = False
+            self.context.verify_mode = ssl.CERT_NONE
+
+        self.sock = self.context.wrap_socket(self.sock, server_hostname=self.host)
+        self.file = self.sock.makefile('r', encoding=getattr(self, 'encoding', 'utf-8'))
+        self.welcome = self.getresp()
+        return self.welcome
+
+
+def upload_to_printer(file_bytes, filename="bambuscribe_plot.gcode.3mf"):
+    """Securely uploads packed bytes to the printer's SD card and tracks live progress."""
+    global plot_active, printer_state
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    # Set timeout to 30 seconds to prevent premature disconnection on big files
+    ftp = ImplicitFTP_TLS(context=ctx, timeout=30)
+    ftp.connect(host=PRINTER_IP, port=990)
+    ftp.login(user="bblp", passwd=ACCESS_CODE)
+    ftp.prot_p()
+
+    bio = io.BytesIO(file_bytes)
+    total_size = len(file_bytes)
+    uploaded_size = [0]
+
+    def upload_callback(data):
+        if not plot_active:
+            raise Exception("Upload aborted by user.")
+        uploaded_size[0] += len(data)
+        # Cap upload progress to 99% until the print actually starts via MQTT.
+        printer_state["progress"] = min(99, int((uploaded_size[0] / total_size) * 100))
+
+    try:
+        ftp.storbinary(f"STOR /{filename}", bio, blocksize=8192, callback=upload_callback)
+    except Exception as e:
+        # Bambu vsftpd sometimes disconnects without sending 226 Transfer Complete.
+        # If all bytes were already sent, we ignore the error.
+        if uploaded_size[0] >= total_size:
+            print("[SD Plotting] Ignored FTP disconnect at end of transfer.")
+        else:
+            raise e
+    finally:
+        try:
+            ftp.quit()
+        except:
+            pass
 
 
 def send_printer_command(cmd, param=""):
@@ -220,7 +311,10 @@ def video_feed():
 
 @app.route('/api/state', methods=['GET'])
 def get_state():
-    return jsonify(printer_state)
+    global printer_state, plot_paused
+    response = printer_state.copy()
+    response["is_paused"] = plot_paused
+    return jsonify(response)
 
 
 @app.route('/api/home', methods=['POST'])
@@ -228,7 +322,7 @@ def home_axes():
     """Send standard home G-code (G28) and center the toolhead."""
     bed_size = float(request.json.get('bed_size', 180.0)) if request.json else 180.0
     mid = bed_size / 2.0
-    send_gcode_chunk(f"G28\nG90\nG0 Z90 F600\nM400\nG0 X{mid:.1f} Y{mid:.1f} F12000\nM400")
+    send_gcode_chunk(f"G28\nG90\nG0 Z90 F1200\nM400\nG0 X{mid:.1f} Y{mid:.1f} F18000\nM400")
     printer_state["is_homed"] = True
     printer_state["position"] = {"x": mid, "y": mid, "z": 90}
     printer_state["progress"] = 0
@@ -242,16 +336,20 @@ def move_axis():
         return jsonify({"status": "error", "message": "Home first!"}), 403
 
     axis = request.json.get('axis').upper()
-    amount = float(request.json.get('amount'))
-    speed = request.json.get('speed')
-    bed_size = float(request.json.get('bed_size', 180.0))
+    try:
+        amount = float(request.json.get('amount'))
+        speed = float(request.json.get('speed', 12000))
+        bed_size = float(request.json.get('bed_size', 180.0))
+        if speed <= 0 or bed_size <= 0:
+            return jsonify({"status": "error", "message": "Invalid parameters"}), 400
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "Invalid parameter types"}), 400
 
     new_pos = printer_state["position"][axis.lower()] + amount
     if new_pos < 0 or new_pos > bed_size:
         return jsonify({"status": "error", "message": f"HARD STOP: {axis} {new_pos} out of bounds."}), 400
 
     printer_state["position"][axis.lower()] = new_pos
-    speed = float(speed) if speed else 12000
 
     if axis == 'Z' and speed > 1200:
         speed = 1200
@@ -268,12 +366,18 @@ def goto_absolute():
     if not printer_state["is_homed"]:
         return jsonify({"status": "error", "message": "Home first!"}), 403
 
+    try:
+        speed = min(float(request.json.get('speed', 12000)), 18000)
+        bed_size = float(request.json.get('bed_size', 180.0))
+        z_hop = float(request.json.get('z_hop', 4.0))
+        if speed <= 0 or z_hop < 0 or bed_size <= 0:
+            return jsonify({"status": "error", "message": "Invalid parameters"}), 400
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "Invalid parameter types"}), 400
+
     x = request.json.get('x')
     y = request.json.get('y')
     z = request.json.get('z')
-    speed = request.json.get('speed', 12000)
-    bed_size = float(request.json.get('bed_size', 180.0))
-    z_hop = float(request.json.get('z_hop', 4.0))
 
     cmds = ["G90"]
     duration = 0.2
@@ -311,16 +415,20 @@ def goto_absolute():
 @app.route('/api/pause', methods=['POST'])
 def pause_plot():
     """Set flag to pause the continuous execution of path chunks."""
-    global plot_paused
+    global plot_paused, printer_state
     plot_paused = True
+    if printer_state["status"] == "Printing SD":
+        send_printer_command("pause")
     return jsonify({"status": "success"})
 
 
 @app.route('/api/resume', methods=['POST'])
 def resume_plot():
     """Unset flag to resume the continuous execution of path chunks."""
-    global plot_paused
+    global plot_paused, printer_state
     plot_paused = False
+    if printer_state["status"] == "Printing SD":
+        send_printer_command("resume")
     return jsonify({"status": "success"})
 
 
@@ -330,7 +438,9 @@ def stop_plot():
     global plot_active, printer_state
     plot_active = False
     printer_state["progress"] = 0
+    printer_state["status"] = "Idle"
     send_gcode_chunk("M410\nM18")
+    send_printer_command("stop")
     return jsonify({"status": "success"})
 
 
@@ -507,7 +617,6 @@ def gen_tsp(img, px_w, px_h, ppm, final_w, gap_mm, ox, oy):
     pts = []
     attempts = 0
 
-    # Thread-Safe RNG: Ensures the math generating visualizer paths matches physical print mathematically identically.
     rng = np.random.default_rng(42)
 
     while len(pts) < num_dots and attempts < num_dots * 20:
@@ -604,10 +713,7 @@ def gen_canny(img_pil, box_w, box_h, min_x, max_x, min_y, max_y):
 
 
 def process_paths_request(data):
-    """
-    Central router that identifies the plotting target (text or image),
-    parses settings, validates bounds, and generates line paths.
-    """
+    """Central router that generates line paths."""
     bbox = data.get('bbox')
     bed_size = float(data.get('bed_size', 180.0))
     if not bbox: return None, "Set Bounding Box (4 points) first."
@@ -689,6 +795,209 @@ def preview_paths():
     return jsonify({"status": "success", "paths": paths, "origin_z": request.json.get('bbox', {}).get('origin_z')})
 
 
+def generate_full_gcode(paths, base_z, speed, z_hop, bed_size):
+    """Calculates the complete static G-Code payload optimized for autonomous SD card printing."""
+    hop_z = min(base_z + z_hop, bed_size)
+    mid = float(bed_size) / 2.0
+
+    speed = int(speed)
+    SAFE_Z_FEEDRATE = int(min(speed, 1200))
+    SAFE_XY_FEEDRATE = int(min(speed, 18000))
+
+    gcode = [
+        "M104 S0 ; turn off nozzle heater",
+        "M140 S0 ; turn off bed heater",
+        "M106 S0 ; turn off fan",
+        "M17",
+        "G90",
+        f"G1 Z90 F{SAFE_Z_FEEDRATE}",
+        f"G0 X{mid:.1f} Y{mid:.1f} F{SAFE_XY_FEEDRATE}",
+        "M400"
+    ]
+
+    current_pos = {"x": mid, "y": mid}
+
+    def is_close(pA, pB):
+        return abs(pA['x'] - pB['x']) < 0.03 and abs(pA['y'] - pB['y']) < 0.03
+
+    for segment in paths:
+        p1, p2 = segment[0], segment[1]
+
+        if not is_close(current_pos, p1):
+            gcode.extend([
+                "M400",
+                f"G1 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}",
+                f"G0 X{p1['x']:.2f} Y{p1['y']:.2f} F{SAFE_XY_FEEDRATE}",
+                "M400",
+                f"G1 Z{base_z:.2f} F{SAFE_Z_FEEDRATE}",
+                "M400"
+            ])
+        else:
+            if abs(current_pos['x'] - p1['x']) > 0.005 or abs(current_pos['y'] - p1['y']) > 0.005:
+                gcode.append(f"G1 X{p1['x']:.2f} Y{p1['y']:.2f} F{speed}")
+
+        gcode.append(f"G1 X{p2['x']:.2f} Y{p2['y']:.2f} F{speed}")
+        current_pos = p2
+
+    gcode.extend([
+        "M400",
+        f"G1 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}",
+        f"G1 Z90 F{SAFE_Z_FEEDRATE}",
+        f"G0 X{mid:.1f} Y{mid:.1f} F{SAFE_XY_FEEDRATE}",
+        "M400 S1"
+    ])
+
+    return "\n".join(gcode)
+
+
+def execute_plot_sd_wrapper(gcode_str):
+    """Background wrapper for generating a 3MF, uploading it, and initiating a full SD print."""
+    global plot_active, printer_state, sequence_id_counter, acked_sequences
+    try:
+        print("[SD Plotting] Packaging G-code into Bambu 3MF archive...")
+        # Force standard UNIX line endings which Bambu expects natively
+        gcode_str = gcode_str.replace('\r\n', '\n') + "\n"
+
+        # Package the raw g-code into a completely standard .3MF (ZIP) metadata wrapper
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            zip_file.writestr("Metadata/plate_1.gcode", gcode_str)
+
+            content_types = (
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
+                '  <Default Extension="gcode" ContentType="application/vnd.bambulab.gcode"/>\n'
+                '  <Default Extension="config" ContentType="application/xml"/>\n'
+                '</Types>'
+            )
+            zip_file.writestr("[Content_Types].xml", content_types)
+
+            slice_info = (
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<config>\n'
+                '  <plate>\n'
+                '    <metadata key="index" value="1"/>\n'
+                '    <metadata key="gcode_file" value="Metadata/plate_1.gcode"/>\n'
+                '    <metadata key="prediction_estimation_time" value="60"/>\n'
+                '  </plate>\n'
+                '</config>'
+            )
+            zip_file.writestr("Metadata/slice_info.config", slice_info)
+
+        archive_bytes = zip_buffer.getvalue()
+        md5_hash = hashlib.md5(archive_bytes).hexdigest()
+        filename = "bambuscribe_plot.gcode.3mf"
+
+        print(f"[SD Plotting] Starting upload to SD card ({len(archive_bytes)} bytes)...")
+        upload_to_printer(archive_bytes, filename)
+
+        if not plot_active:
+            print("[SD Plotting] Upload aborted.")
+            return
+
+        print(f"[SD Plotting] Upload complete. Initiating {filename} on printer...")
+        printer_state["status"] = "Starting Print"
+        printer_state["progress"] = 99
+
+        time.sleep(3.0)
+        
+        # Verify active atomic state after thread sleeping
+        if not plot_active:
+            print("[SD Plotting] Plot aborted before triggering print.")
+            return
+
+        sequence_id_counter += 1
+        seq_id = str(sequence_id_counter)
+        payload = {
+            "print": {
+                "sequence_id": seq_id,
+                "command": "project_file",
+                "param": "Metadata/plate_1.gcode",
+                "project_id": "0",
+                "profile_id": "0",
+                "task_id": "0",
+                "subtask_id": "0",
+                "subtask_name": "BambuScribe Plot",
+                "file": f"/{filename}",
+                "url": f"ftp://{PRINTER_IP}/{filename}",
+                "md5": md5_hash,
+                "use_ams": False,
+                "bed_leveling": False,
+                "vibration_cali": False,
+                "layer_inspect": False,
+                "flow_cali": False,
+                "timelapse": False
+            }
+        }
+        client.publish(TOPIC_PUBLISH, json.dumps(payload, separators=(',', ':')))
+        print("[SD Plotting] Print command sent. Waiting for acknowledgment...")
+
+        wait_start = time.time()
+        acked = False
+        while time.time() - wait_start < 10.0:
+            if not plot_active:
+                return
+            if seq_id in acked_sequences:
+                acked = True
+                acked_sequences.discard(seq_id)
+                break
+            time.sleep(0.1)
+
+        if not acked:
+            print("[WARNING] No acknowledgment from printer for SD print. It may have started anyway.")
+            
+        printer_state["status"] = "Printing SD"
+        printer_state["progress"] = 0
+        print("[SD Plotting] Print job is active!")
+
+    except Exception as e:
+        print(f"\n[SD Plotting Error]: {e}")
+        traceback.print_exc()
+        if plot_active:
+            printer_state["status"] = "Failed"
+        else:
+            printer_state["status"] = "Idle"
+        plot_active = False
+        printer_state["progress"] = 0
+
+
+@app.route('/api/plot_sd', methods=['POST'])
+def plot_paths_sd():
+    """Endpoint starting an autonomous plot by uploading full G-code to SD and triggering it."""
+    global plot_active, plot_paused, printer_state
+    data = request.json
+    paths, msg = process_paths_request(data)
+    if not paths: return jsonify({"status": "error", "message": msg}), 400
+
+    if plot_active:
+        return jsonify({"status": "error", "message": "A plot is already running!"}), 400
+
+    try:
+        speed = min(float(data.get('speed', 12000)), 18000.0)
+        z_hop = float(data.get('z_hop', 4.0))
+        bed_size = float(data.get('bed_size', 180.0))
+        bbox = data.get('bbox', {})
+        origin_z = float(bbox.get('origin_z', 0.0)) if bbox else 0.0
+        
+        if speed <= 0 or z_hop < 0 or bed_size <= 0 or not (0 <= origin_z <= bed_size):
+            return jsonify({"status": "error", "message": "Invalid plotting parameters provided."}), 400
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "Invalid parameter types."}), 400
+
+    try:
+        gcode_str = generate_full_gcode(paths, origin_z, speed, z_hop, bed_size)
+        plot_active = True
+        plot_paused = False
+        printer_state["progress"] = 0
+        printer_state["status"] = "Uploading"
+
+        threading.Thread(target=execute_plot_sd_wrapper, args=(gcode_str,)).start()
+        return jsonify({"status": "success"})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 def execute_plot_wrapper(paths, base_z, speed, z_hop, bed_size):
     """Execution wrapper to isolate and catch errors occurring inside the background plotting thread."""
     global plot_active, printer_state
@@ -699,26 +1008,38 @@ def execute_plot_wrapper(paths, base_z, speed, z_hop, bed_size):
         traceback.print_exc()
         plot_active = False
         printer_state["progress"] = 0
+        printer_state["status"] = "Idle"
 
 
 @app.route('/api/plot', methods=['POST'])
 def plot_paths():
-    """Endpoint starting the plot. Kicks off the background execution thread."""
+    """Endpoint starting the streaming plot. Kicks off the background execution thread."""
     global plot_active, plot_paused, acked_sequences, printer_state
 
     data = request.json
     paths, msg = process_paths_request(data)
     if not paths: return jsonify({"status": "error", "message": msg}), 400
 
-    speed = int(data['speed'])
-    origin_z = data.get('bbox', {}).get('origin_z')
-    z_hop = float(data.get('z_hop', 4.0))
-    bed_size = float(data.get('bed_size', 180.0))
+    if plot_active:
+        return jsonify({"status": "error", "message": "A plot is already running!"}), 400
+
+    try:
+        speed = float(data.get('speed', 12000))
+        z_hop = float(data.get('z_hop', 4.0))
+        bed_size = float(data.get('bed_size', 180.0))
+        bbox = data.get('bbox', {})
+        origin_z = float(bbox.get('origin_z', 0.0)) if bbox else 0.0
+        
+        if speed <= 0 or z_hop < 0 or bed_size <= 0 or not (0 <= origin_z <= bed_size):
+            return jsonify({"status": "error", "message": "Invalid plotting parameters provided."}), 400
+    except (ValueError, TypeError):
+        return jsonify({"status": "error", "message": "Invalid parameter types."}), 400
 
     plot_active = True
     plot_paused = False
     acked_sequences.clear()
     printer_state["progress"] = 0
+    printer_state["status"] = "Streaming"
 
     threading.Thread(target=execute_plot_wrapper, args=(paths, origin_z, speed, z_hop, bed_size)).start()
     return jsonify({"status": "success"})
@@ -731,14 +1052,13 @@ def execute_plot(paths, base_z, speed, z_hop, bed_size):
     maintaining exact timings so the hardware doesn't overrun.
     """
     global plot_active, printer_state
+    speed = int(speed)
     hop_z = min(base_z + z_hop, bed_size)
     mid = float(bed_size) / 2.0
 
-    SAFE_Z_FEEDRATE = 400
-    SAFE_XY_FEEDRATE = 18000
+    SAFE_Z_FEEDRATE = min(speed, 1200)
+    SAFE_XY_FEEDRATE = min(speed, 18000)
 
-    # Calculate perfect physical durations to prevent script from running ahead of hardware buffer.
-    # 0.05s penalty added to EVERY move to account for mechanical acceleration profiles.
     z_time_hop = (abs(hop_z - base_z) / (SAFE_Z_FEEDRATE / 60.0)) + 0.05
 
     timed_commands = [
@@ -746,8 +1066,7 @@ def execute_plot(paths, base_z, speed, z_hop, bed_size):
         {"cmd": "G90", "time": 0.1},
         {"cmd": f"G1 Z90 F{SAFE_Z_FEEDRATE}", "time": 1.5},
         {"cmd": f"G0 X{mid:.1f} Y{mid:.1f} F{SAFE_XY_FEEDRATE}", "time": 1.5},
-        {"cmd": "M400", "time": 0.1},
-        {"cmd": "G4 P500", "time": 0.5}
+        {"cmd": "M400", "time": 0.1}
     ]
 
     current_pos = {"x": mid, "y": mid}
@@ -761,18 +1080,16 @@ def execute_plot(paths, base_z, speed, z_hop, bed_size):
         if not is_close(current_pos, p1):
             dist = math.hypot(p1['x'] - current_pos['x'], p1['y'] - current_pos['y'])
 
-            timed_commands.append({"cmd": "M400", "time": 0.1})
+            timed_commands.append({"cmd": "M400", "time": 0.05})
             timed_commands.append({"cmd": f"G1 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}", "time": z_time_hop})
-            timed_commands.append({"cmd": "M400", "time": 0.1})
-            timed_commands.append({"cmd": "G4 P200", "time": 0.2})
+            timed_commands.append({"cmd": "M400", "time": 0.05})
 
             travel_time = (dist / (SAFE_XY_FEEDRATE / 60.0)) + 0.05
             timed_commands.append({"cmd": f"G0 X{p1['x']:.2f} Y{p1['y']:.2f} F{SAFE_XY_FEEDRATE}", "time": travel_time})
 
-            timed_commands.append({"cmd": "M400", "time": 0.1})
+            timed_commands.append({"cmd": "M400", "time": 0.05})
             timed_commands.append({"cmd": f"G1 Z{base_z:.2f} F{SAFE_Z_FEEDRATE}", "time": z_time_hop})
-            timed_commands.append({"cmd": "M400", "time": 0.1})
-            timed_commands.append({"cmd": "G4 P300", "time": 0.3})
+            timed_commands.append({"cmd": "M400", "time": 0.05})
         else:
             if abs(current_pos['x'] - p1['x']) > 0.005 or abs(current_pos['y'] - p1['y']) > 0.005:
                 dist = math.hypot(p1['x'] - current_pos['x'], p1['y'] - current_pos['y'])
@@ -789,15 +1106,12 @@ def execute_plot(paths, base_z, speed, z_hop, bed_size):
         {"cmd": "M400", "time": 0.1},
         {"cmd": f"G1 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}", "time": z_time_hop},
         {"cmd": "M400", "time": 0.1},
-        {"cmd": "G4 P250", "time": 0.25},
         {"cmd": f"G1 Z90 F{SAFE_Z_FEEDRATE}", "time": 1.5},
         {"cmd": f"G0 X{mid:.1f} Y{mid:.1f} F{SAFE_XY_FEEDRATE}", "time": 1.5},
         {"cmd": "M400", "time": 0.1},
         {"cmd": "M400 S1", "time": 1.0}
     ])
 
-    # Dynamic Payload Packing: Groups commands by string length (800 bytes) instead of flat counts.
-    # Result: 90% fewer network calls, drastically lower risk of dropped packets, smoother hardware buffer.
     chunks = []
     current_chunk_cmds = []
     current_chunk_time = 0.0
@@ -821,7 +1135,6 @@ def execute_plot(paths, base_z, speed, z_hop, bed_size):
         if not plot_active:
             break
 
-        # Check the last command in the chunk to update the web visualizer state safely
         for cmd_str in reversed(chunk["str"].split('\n')):
             if "X" in cmd_str and "Y" in cmd_str:
                 parts = cmd_str.split()
@@ -854,6 +1167,7 @@ def execute_plot(paths, base_z, speed, z_hop, bed_size):
     plot_active = False
     printer_state["position"].update({"x": mid, "y": mid, "z": 90})
     printer_state["progress"] = 100
+    printer_state["status"] = "Idle"
 
 
 if __name__ == '__main__':

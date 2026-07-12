@@ -1,12 +1,12 @@
 # BAMBUSCRIBE
 **An open-source suite to transform your Bambu Lab 3D printer into a precision 2D plotter**
 
-[![Version](https://img.shields.io/badge/Version-v1.0.0-blue?style=flat-square)](#)
+[![Version](https://img.shields.io/badge/Version-v1.1.0-blue?style=flat-square)](#)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg?style=flat-square)](#)
 
 Bambu Lab printers possess incredibly fast, precise CoreXY kinematics. While they are phenomenal at extruding plastic, that same hardware is perfect for high-speed 2D plotting, drawing, and vector art. 
 
-Usually, turning a 3D printer into a plotter requires fighting with slicer software, faking Z-heights, and manually transferring SD cards. BambuScribe bypasses all of that. By establishing a direct Service Level Connection (SLC) via MQTT, BambuScribe streams raw G-code over your local network in real-time, effectively turning your 3D printer into a live, interactive robotic arm controlled from your web browser.
+Usually, turning a 3D printer into a plotter requires fighting with slicer software, faking Z-heights, and manually transferring SD cards. BambuScribe bypasses all of that. By establishing a direct Service Level Connection (SLC) via MQTT and FTPS, BambuScribe packages and executes code autonomously over your local network, effectively turning your 3D printer into a live, interactive robotic arm controlled from your web browser.
 
 ---
 
@@ -50,7 +50,8 @@ One thing I noticed with existing mounts is that the pen is physically offset fr
 
 ## Features
 
-- **Live MQTT Streaming:** No SD cards. No slicers. BambuScribe calculates the toolpath in the browser, sends it to the Flask backend, and streams raw G-code chunks directly to the printer over LAN.
+- **Untethered Autonomous Plotting (New in v1.1.0!):** Choose to package your plot into a Bambu-compliant `.3mf` file. BambuScribe will securely upload it directly to your printer's SD card via Implicit FTPS and trigger the print. You can safely close your laptop or turn off your PC while the printer works!
+- **Live MQTT Streaming:** Prefer a live approach? BambuScribe can still calculate the toolpath in the browser, send it to the Flask backend, and stream raw G-code chunks directly to the printer over LAN in real-time.
 - **Printer Support:** Officially tested and supported on the Bambu Lab A1 Mini, featuring Beta support for the standard Bambu Lab A1.
 - **Interactive 3D Visualizer:** Features a built-in Three.js digital twin of your printer's build volume. Watch your toolhead move in real-time and preview exactly where ink will touch the paper before you hit print.
 - **Native Text Engine:** Uses Hershey Vector Fonts to generate pure single-line text paths. Features auto-wrapping, scaling, and cursive/standard typography styles. 
@@ -85,11 +86,11 @@ BambuScribe's processing engine is fully featured and capable of handling comple
 
 ## How It Works
 
-### **The MQTT Handshake**
-Bambu Lab printers utilize a secure MQTT broker running on port `8883` when in LAN Only Mode. BambuScribe acts as a local client, authenticating using the `bblp` user and your printer's physical Access Code. 
+### **The SD Handoff Pipeline**
+When running autonomously, BambuScribe packages the raw plotted G-code into a standard `.3mf` ZIP archive containing metadata files (`[Content_Types].xml` and `slice_info.config`) to prevent the printer's touchscreen parser from crashing. It then connects to the printer via a secure FTP client on port 990, uploads the archive, and sends an MQTT `project_file` command to trigger the plot.
 
 ### **The Streaming Pipeline**
-Because a printer's internal buffer will choke if you send a 50,000-line G-code file all at once over MQTT, BambuScribe utilizes a **Custom Chunking Pipeline**. The web UI calculates the entire toolpath, and the Python backend groups these paths into timed chunks, tracking acknowledgments from the printer to feed the buffer smoothly.
+If running in live-stream mode, BambuScribe utilizes a **Custom Chunking Pipeline**. Because a printer's internal buffer will choke if you send a 50,000-line G-code file all at once over MQTT, the backend groups the paths into timed chunks, tracking acknowledgments from the printer to feed the buffer smoothly.
 
 ---
 
@@ -122,8 +123,8 @@ You can access the original high-resolution vector PDF files directly here:
 
 Please read these carefully before using the software:
 
-- **Slow Print Times:** The current print time is painfully slow. This is because each MQTT packet is individually validated in real-time to ensure complete accuracy and to prevent buffer overflow on the printer. This is bound to improve with future updates.
-- **Host Device Sleep Disconnect:** Because the G-code commands are actively streamed over your local network, **the host device (your laptop/PC) MUST remain awake and connected to Wi-Fi for the entire duration of the plot.** If your computer goes to sleep or you close the lid, the data stream will sever and your printer will halt mid-drawing.
+- **SD Startup Delay:** After sending an untethered plot to the SD card, **the printer can take a good 5 to 15 seconds to unpack the 3MF file and begin moving.** The UI will say "Printing SD", but the machine may sit idle while it thinks. Be patient!
+- **Streaming Mode Limitations:** If you choose to use the "Stream via Wi-Fi" option instead of the SD card method, your host computer *must* remain awake and connected to Wi-Fi for the entire duration of the plot. Additionally, streaming mode is significantly slower than SD mode due to real-time packet validation.
 - **Unused Camera Feed:** Although the dashboard features a dedicated view for the live raw camera feed, it is currently unused—meaning it is not yet utilized for capturing timelapses or driving computer-vision-based auto-centering and calibration. This is set to change in the near future!
 - **No Skew Calibration:** The engine does not currently skew or warp text/images to match an angled bounding box.
 - **No Auto-Homing Recovery:** If the printer detects a hardware discrepancy (e.g., skipped steps), it will not auto-home to recover its coordinates. 
@@ -141,13 +142,10 @@ Please read these carefully before using the software:
 - **Custom Pen Hardware:** Designing and publishing a original, optimized 3D-printed screw mount to center the pen and fix the nozzle offset.
 - **Multi-Color Support:** Adding pause sequences and UI prompts to allow for manual pen swapping for multi-colored plots.
 
-### **Independence & Pipeline Upgrades**
-- **Stream to Handoff:** Re-engineering the MQTT pipeline to batch-transfer the entire G-code file to the printer's cache, allowing you to safely close your laptop lid or turn off your PC while it prints.
+### **Intelligence & Expansion**
 - **Audio Cues & Sound Support:** Implementing auditory alerts and system pings for finished plots, manual pen swaps, or hardware boundary errors.
 - **Expanded Image Algorithms:** Adding advanced dithering algorithms, halftone dots, and multi-pass CMYK color separation for images to offer even more creative choices.
 - **Skew & Surface Interpolation:** Upgrading the bounding box math to support full affine transformations (skewing/warping text to match an angled bounding box) and 3D Z-height interpolation across all 4 corners to adapt to unlevel drawing planes.
-
-### **Intelligence & Expansion**
 - **AI Handwriting Replication:** Integrating a generative AI model that analyzes a sample of your physical handwriting and plots text vectors mimicking your exact penmanship.
 - **Platform-Specific Apps:** Transitioning the web-wrapper into native Desktop/Mobile applications with session continuity.
 - **Printer Expansion:** Abstracting the kinematics engine to officially support the Bambu Lab P1P, P1S, X1C, and eventually non-Bambu network-capable CoreXY printers.
@@ -157,7 +155,7 @@ Please read these carefully before using the software:
 ## Technical Stack
 
 - **Backend:** Python 3.10+, Flask
-- **Communication:** Paho-MQTT, Socket/SSL (for Camera Stream)
+- **Communication:** Paho-MQTT, Implicit FTPS, Socket/SSL (for Camera Stream)
 - **Frontend UI:** HTML/CSS/JS, Material Web Components
 - **3D Engine:** Three.js
 - **Media Processing:** OpenCV (Canny Edge), NumPy, Pillow (Image processing), Hershey-Fonts (Vector typography)

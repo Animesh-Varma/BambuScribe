@@ -89,13 +89,25 @@
 </head>
 <body>
 
-    <div id="model-modal" style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; display:flex; align-items:center; justify-content:center;">
+    <div id="model-modal" role="dialog" aria-modal="true" aria-labelledby="model-modal-title" style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; display:flex; align-items:center; justify-content:center;">
         <div style="background:var(--surface-color); padding:32px; border-radius:24px; text-align:center; max-width:400px; box-shadow: 0 8px 24px rgba(0,0,0,0.2);">
-            <h2 style="margin-top:0;">Select Printer Model</h2>
+            <h2 id="model-modal-title" style="margin-top:0;">Select Printer Model</h2>
             <p style="margin-bottom:24px; color:var(--text-color);">Choose your 3D printer model to configure the correct bed size for plotting.</p>
             <div style="display:flex; flex-direction:column; gap:16px;">
                 <md-filled-button onclick="selectModel(180)">A1 mini (180x180x180)</md-filled-button>
                 <md-filled-tonal-button onclick="selectModel(256)">A1 (Beta) (256x256x256)</md-filled-tonal-button>
+            </div>
+        </div>
+    </div>
+
+    <div id="plot-method-modal" role="dialog" aria-modal="true" aria-labelledby="plot-method-title" style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; display:none; align-items:center; justify-content:center;">
+        <div style="background:var(--surface-color); padding:32px; border-radius:24px; text-align:center; max-width:400px; box-shadow: 0 8px 24px rgba(0,0,0,0.2);">
+            <h2 id="plot-method-title" style="margin-top:0;">Select Plotting Method</h2>
+            <p style="margin-bottom:24px; color:var(--text-color);">Stream via WiFi for live control, or send the entire file to the printer's SD card to run autonomously.</p>
+            <div style="display:flex; flex-direction:column; gap:16px;">
+                <md-filled-button id="btn-sd-plot" onclick="startPlot('send')"><md-icon slot="icon">sd_card</md-icon> Send to SD Card</md-filled-button>
+                <md-filled-tonal-button onclick="startPlot('stream')"><md-icon slot="icon">wifi</md-icon> Stream via WiFi</md-filled-tonal-button>
+                <md-outlined-button onclick="closePlotModal()">Cancel</md-outlined-button>
             </div>
         </div>
     </div>
@@ -131,8 +143,17 @@
             </div>
 
             <div style="display: flex; gap: 10px; align-items: center; margin-top: 10px; margin-bottom: 10px;">
-                <md-outlined-text-field id="manual-speed" type="number" value="12000" label="XY Speed" style="flex: 1;"></md-outlined-text-field>
-                <md-outlined-text-field id="manual-speed-z" type="number" value="12000" label="Z Speed" style="flex: 1;"></md-outlined-text-field>
+                <md-outlined-select id="manual-speed" label="Manual XY Speed" style="flex: 1;">
+                    <md-select-option value="5000"><div slot="headline">5000 mm/min</div></md-select-option>
+                    <md-select-option value="12000" selected><div slot="headline">12000 mm/min</div></md-select-option>
+                    <md-select-option value="18000"><div slot="headline">18000 mm/min (Max)</div></md-select-option>
+                </md-outlined-select>
+
+                <md-outlined-select id="manual-speed-z" label="Manual Z Speed" style="flex: 1;">
+                    <md-select-option value="400"><div slot="headline">400 mm/min</div></md-select-option>
+                    <md-select-option value="800"><div slot="headline">800 mm/min</div></md-select-option>
+                    <md-select-option value="1200" selected><div slot="headline">1200 mm/min (Max)</div></md-select-option>
+                </md-outlined-select>
             </div>
 
             <div class="step-selector">
@@ -188,10 +209,12 @@
                     </md-outlined-select>
                     <md-outlined-text-field id="doc-spacing" type="number" label="Line Gap (mm)" value="10"></md-outlined-text-field>
                     <md-outlined-text-field id="doc-size" type="number" label="Scale (%)" value="100"></md-outlined-text-field>
+
                     <md-outlined-select id="doc-speed" label="Plot Speed">
                         <md-select-option value="2000"><div slot="headline">Slow (2000)</div></md-select-option>
                         <md-select-option value="5000" selected><div slot="headline">Normal (5000)</div></md-select-option>
                         <md-select-option value="12000"><div slot="headline">Fast (12000)</div></md-select-option>
+                        <md-select-option value="18000"><div slot="headline">Max (18000)</div></md-select-option>
                     </md-outlined-select>
                 </div>
                 <div style="margin-bottom: 16px; display: flex; gap: 24px;">
@@ -249,20 +272,22 @@
                         <md-outlined-text-field id="img-offset-x" type="number" label="Offset X (mm)" value="0" style="flex:1;"></md-outlined-text-field>
                         <md-outlined-text-field id="img-offset-y" type="number" label="Offset Y (mm)" value="0" style="flex:1;"></md-outlined-text-field>
                     </div>
+
                     <md-outlined-select id="img-speed" label="Plot Speed">
+                        <md-select-option value="2000"><div slot="headline">Slow (2000)</div></md-select-option>
                         <md-select-option value="5000"><div slot="headline">Normal (5000)</div></md-select-option>
                         <md-select-option value="12000" selected><div slot="headline">Fast (12000)</div></md-select-option>
+                        <md-select-option value="18000"><div slot="headline">Max (18000)</div></md-select-option>
                     </md-outlined-select>
                 </div>
             </div>
 
             <div id="progress-container" style="display:none; margin-top: 16px; flex-direction: column; gap: 8px;">
                 <div style="display:flex; justify-content:space-between; font-weight:500;">
-                    <span>Plotting Progress</span>
-                    <span id="progress-text">0%</span>
+                    <span id="progress-text">Status: 0%</span>
                 </div>
                 <div style="width:100%; background:var(--canvas-bg); height:8px; border-radius:4px; overflow:hidden;">
-                    <div id="progress-bar" style="width:0%; background:var(--md-sys-color-primary); height:100%; transition:width 0.3s;"></div>
+                    <div id="progress-bar" style="width:0%; background:var(--md-sys-color-primary); height:100%; transition:width 0.3s, background 0.3s;"></div>
                 </div>
             </div>
 
@@ -878,33 +903,77 @@
 
         document.getElementById('btn-preview').addEventListener('click', triggerPreview);
 
-        document.getElementById('btn-plot').addEventListener('click', async () => {
+        document.getElementById('btn-plot').addEventListener('click', () => {
             if(!confirm("Ready to draw? Ensure pen is lowered and paper is secure!")) return;
+            const modal = document.getElementById('plot-method-modal');
+            modal.style.display = 'flex';
+            setTimeout(() => document.getElementById('btn-sd-plot').focus(), 50);
+        });
 
-            document.getElementById('btn-plot').style.display = 'none';
-            document.getElementById('btn-preview').style.display = 'none';
-            document.getElementById('btn-pause').style.display = 'inline-flex';
-            document.getElementById('btn-estop').style.display = 'inline-flex';
+        window.closePlotModal = function() {
+            document.getElementById('plot-method-modal').style.display = 'none';
+            document.getElementById('btn-plot').focus();
+        }
 
-            const res = await fetch('/api/plot', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(getPayload()) });
-            const data = await res.json();
+        function trapFocus(modal, e) {
+            const focusable = modal.querySelectorAll('md-filled-button, md-filled-tonal-button, md-outlined-button');
+            if (focusable.length === 0) return;
 
-            if (data.status !== 'success') {
-                showWarning(data.message);
-                resetPlottingUI();
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+
+            if (e.key === 'Tab') {
+                if (e.shiftKey && document.activeElement === first) {
+                    last.focus();
+                    e.preventDefault();
+                } else if (!e.shiftKey && document.activeElement === last) {
+                    first.focus();
+                    e.preventDefault();
+                }
+            }
+        }
+
+        document.getElementById('plot-method-modal').addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closePlotModal();
+            } else {
+                trapFocus(document.getElementById('plot-method-modal'), e);
             }
         });
 
+        document.getElementById('model-modal').addEventListener('keydown', (e) => {
+            trapFocus(document.getElementById('model-modal'), e);
+        });
+
+        window.startPlot = async function(method) {
+            document.getElementById('plot-method-modal').style.display = 'none';
+            document.getElementById('btn-plot').style.display = 'none';
+            document.getElementById('btn-preview').style.display = 'none';
+
+            // Allow stopping hardware regardless of execution method
+            document.getElementById('btn-estop').style.display = 'inline-flex';
+            const endpoint = method === 'stream' ? '/api/plot' : '/api/plot_sd';
+
+            try {
+                const res = await fetch(endpoint, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(getPayload()) });
+                const data = await res.json();
+
+                if (data.status !== 'success') {
+                    showWarning(data.message);
+                    resetPlottingUI();
+                }
+            } catch(e) {
+                showWarning("Error: " + e.message);
+                resetPlottingUI();
+            }
+        };
+
         document.getElementById('btn-pause').addEventListener('click', async () => {
             await fetch('/api/pause', { method: 'POST' });
-            document.getElementById('btn-pause').style.display = 'none';
-            document.getElementById('btn-resume').style.display = 'inline-flex';
         });
 
         document.getElementById('btn-resume').addEventListener('click', async () => {
             await fetch('/api/resume', { method: 'POST' });
-            document.getElementById('btn-resume').style.display = 'none';
-            document.getElementById('btn-pause').style.display = 'inline-flex';
         });
 
         document.getElementById('btn-estop').addEventListener('click', async () => {
@@ -920,29 +989,72 @@
             document.getElementById('btn-preview').style.display = 'inline-flex';
             document.getElementById('btn-plot').style.display = 'inline-flex';
             document.getElementById('progress-container').style.display = 'none';
+            document.getElementById('progress-bar').style.background = 'var(--md-sys-color-primary)';
         }
 
-        // State Polling Loop to update UI coordinates/progress against physical device state.
+        // State Polling Loop to track progress and sync physical status intelligently.
         setInterval(async () => {
             if (!isHomed && !isProcessingQueue && currentPos.x === 0) return;
             try {
                 const res = await fetch('/api/state');
                 const data = await res.json();
+
                 if (data.is_homed) {
+                    // Update positional tracker
                     if (!isProcessingQueue && manualQueue.length === 0) {
                         update3DVisualizer(data.position.x, data.position.y, data.position.z);
                     }
-                    if (document.getElementById('btn-pause').style.display !== 'none' || document.getElementById('btn-resume').style.display !== 'none') {
+
+                    // Unified Tracker updating
+                    if (data.status !== "Idle") {
                         document.getElementById('progress-container').style.display = 'flex';
                         document.getElementById('progress-bar').style.width = data.progress + '%';
-                        document.getElementById('progress-text').innerText = data.progress + '%';
-                        if (data.progress === 100) resetPlottingUI();
+                        document.getElementById('btn-estop').style.display = 'inline-flex';
+
+                        if (data.status === "Failed") {
+                            document.getElementById('progress-text').innerText = "Print Failed! Check printer.";
+                            document.getElementById('progress-bar').style.background = '#ba1a1a';
+                            document.getElementById('btn-pause').style.display = 'none';
+                            document.getElementById('btn-resume').style.display = 'none';
+                        } else if (data.status === "Uploading") {
+                            document.getElementById('progress-text').innerText = `Uploading to SD Card... ${data.progress}%`;
+                            document.getElementById('progress-bar').style.background = 'var(--md-sys-color-primary)';
+                            document.getElementById('btn-pause').style.display = 'none';
+                            document.getElementById('btn-resume').style.display = 'none';
+                        } else if (data.status === "Starting Print") {
+                            document.getElementById('progress-text').innerText = `Starting print on hardware...`;
+                            document.getElementById('progress-bar').style.background = 'var(--md-sys-color-primary)';
+                            document.getElementById('btn-pause').style.display = 'none';
+                            document.getElementById('btn-resume').style.display = 'none';
+                        } else {
+                            document.getElementById('progress-bar').style.background = 'var(--md-sys-color-primary)';
+                            document.getElementById('progress-text').innerText = data.status === "Printing SD"
+                                ? `Autonomous SD Print... ${data.progress}%`
+                                : `Streaming Plot Over WiFi... ${data.progress}%`;
+
+                            if (data.is_paused) {
+                                document.getElementById('btn-pause').style.display = 'none';
+                                document.getElementById('btn-resume').style.display = 'inline-flex';
+                            } else {
+                                document.getElementById('btn-pause').style.display = 'inline-flex';
+                                document.getElementById('btn-resume').style.display = 'none';
+                            }
+                        }
                     } else {
+                        // Plotting loop is Idle. Clear dynamic layout changes if they linger.
                         document.getElementById('progress-container').style.display = 'none';
+                        document.getElementById('progress-bar').style.background = 'var(--md-sys-color-primary)';
+                        if (document.getElementById('btn-plot').style.display === 'none') {
+                            resetPlottingUI();
+                        }
                     }
                 }
             } catch(e) {}
         }, 1000);
+
+        if (document.getElementById('model-modal').style.display !== 'none') {
+            setTimeout(() => document.querySelector('#model-modal md-filled-button').focus(), 50);
+        }
 
         updateBBoxDots();
         renderBBoxList();
