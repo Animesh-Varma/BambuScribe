@@ -1,7 +1,7 @@
 # BAMBUSCRIBE
 **An open-source suite to transform your Bambu Lab 3D printer into a precision 2D plotter**
 
-[![Version](https://img.shields.io/badge/Version-v1.1.0-blue?style=flat-square)](#)
+[![Version](https://img.shields.io/badge/Version-v1.1.1-blue?style=flat-square)](#)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg?style=flat-square)](#)
 [![Demo Video](https://img.shields.io/badge/YouTube-Watch_Demo-red?style=flat-square&logo=youtube)](https://youtu.be/aic8SkLXlUo)
 
@@ -51,7 +51,7 @@ One thing I noticed with existing mounts is that the pen is physically offset fr
 
 ## Features
 
-- **Untethered Autonomous Plotting (New in v1.1.0!):** Choose to package your plot into a Bambu-compliant `.3mf` file. BambuScribe will securely upload it directly to your printer's SD card via Implicit FTPS and trigger the print. You can safely close your laptop or turn off your PC while the printer works!
+- **Untethered Autonomous Plotting:** Choose to package your plot into a Bambu-compliant `.3mf` file. BambuScribe will securely upload it directly to your printer's SD card via Implicit FTPS and trigger the print. You can safely close your laptop or turn off your PC while the printer works!
 - **Live MQTT Streaming:** Prefer a live approach? BambuScribe can still calculate the toolpath in the browser, send it to the Flask backend, and stream raw G-code chunks directly to the printer over LAN in real-time.
 - **Printer Support:** Officially tested and supported on the Bambu Lab A1 Mini, featuring Beta support for the standard Bambu Lab A1.
 - **Interactive 3D Visualizer:** Features a built-in Three.js digital twin of your printer's build volume. Watch your toolhead move in real-time and preview exactly where ink will touch the paper before you hit print.
