@@ -1,8 +1,8 @@
 # BAMBUSCRIBE
 **An open-source suite to transform your Bambu Lab 3D printer into a precision 2D plotter**
 
-[![Version](https://img.shields.io/badge/Version-v1.1.0-blue?style=flat-square)](#)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg?style=flat-square)](#)
+![Version](https://img.shields.io/badge/Version-v1.1.1-blue?style=flat-square)
+![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg?style=flat-square)
 [![Demo Video](https://img.shields.io/badge/YouTube-Watch_Demo-red?style=flat-square&logo=youtube)](https://youtu.be/aic8SkLXlUo)
 
 Bambu Lab printers possess incredibly fast, precise CoreXY kinematics. While they are phenomenal at extruding plastic, that same hardware is perfect for high-speed 2D plotting, drawing, and vector art. 
@@ -67,6 +67,7 @@ One thing I noticed with existing mounts is that the pen is physically offset fr
 BambuScribe's processing engine is fully featured and capable of handling complex image algorithms and typography with precision. All image generation constraints have been resolved and implemented beautifully.
 
 ### Video Demo
+
 See BambuScribe (v1.1.0) in action! Watch the demonstration video on YouTube:
 
 <div align="center">
@@ -79,6 +80,7 @@ See BambuScribe (v1.1.0) in action! Watch the demonstration video on YouTube:
 <br>
 
 ### Image Styles
+
 <div align="center">
 
 | Original Reference |            Crosshatching <br>*(Supports down to 0.1mm, shot at ~0.6mm)*             | Stippling (TSP) | Edge / Line Art |
@@ -87,6 +89,7 @@ See BambuScribe (v1.1.0) in action! Watch the demonstration video on YouTube:
 </div>
 
 ### Typography & Text Engine
+
 <div align="center">
   <img src="assets/showcase_text.jpg" alt="Text Styles on Paper" width="600">
   <br><br>
