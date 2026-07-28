@@ -81,7 +81,7 @@
         .img-uploader { border: 2px dashed var(--border-color); border-radius: 16px; padding: 40px; text-align: center; cursor: pointer; transition: background 0.3s; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;}
         .img-uploader:hover { background: var(--canvas-bg); }
 
-        #preview-2d { width: 100%; aspect-ratio: 1; border: 1px solid var(--border-color); border-radius: 12px; background: var(--canvas-bg); display: none; }
+        #preview-2d { width: 100%; aspect-ratio: 1; border: 1px solid var(--border-color); border-radius: 12px; background: var(--canvas-bg); display: block; }
         .zoom-controls { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
 
         #queue-display { margin-top: 16px; padding: 8px; font-size: 13px; font-family: monospace; background: var(--bg-color); border-radius: 8px; color: var(--text-color); flex-grow: 1; overflow-y: auto; max-height: 100px; border: 1px solid var(--border-color); }
@@ -238,7 +238,10 @@
                             <p style="font-size: 16px; font-weight: 500; margin: 10px 0 0 0;">Upload Image</p>
                             <input type="file" id="img-input" accept="image/png, image/jpeg, image/webp" style="display: none;">
                         </div>
-                        <canvas id="preview-2d"></canvas>
+                        <div id="preview-wrapper" style="display: none; flex: 1; flex-direction: column; gap: 12px; align-items: center; width: 100%;">
+                            <canvas id="preview-2d" style="width: 100%; aspect-ratio: 1; border: 1px solid var(--border-color); border-radius: 12px; background: var(--canvas-bg);"></canvas>
+                            <md-outlined-button onclick="clearImage()" style="width: 100%;"><md-icon slot="icon">delete</md-icon> Clear Image</md-outlined-button>
+                        </div>
                     </div>
                     <md-outlined-select id="img-method" label="Plotting Method" style="width: 100%;">
                         <md-select-option value="hatch" selected><div slot="headline">Crosshatching (Classic)</div></md-select-option>
@@ -501,11 +504,22 @@
             reader.onload = (event) => {
                 base64Image = event.target.result;
                 document.getElementById('upload-box').style.display = 'none';
+                document.getElementById('preview-wrapper').style.display = 'flex';
                 document.getElementById('preview-2d').style.display = 'block';
                 autoPreview();
             };
             reader.readAsDataURL(file);
         });
+
+        window.clearImage = function() {
+            base64Image = null;
+            document.getElementById('preview-wrapper').style.display = 'none';
+            document.getElementById('upload-box').style.display = 'flex';
+            document.getElementById('img-input').value = '';
+            textPathsGroup.clear();
+            document.getElementById('btn-plot').disabled = true;
+        }
+
 
         document.getElementById('img-gap').addEventListener('input', (e) => { document.getElementById('label-gap').innerText = parseFloat(e.target.value).toFixed(1) + ' mm'; saveImgSettings(); autoPreview(); });
         document.getElementById('img-contrast').addEventListener('input', (e) => { document.getElementById('label-contrast').innerText = parseFloat(e.target.value).toFixed(1) + ' x'; saveImgSettings(); autoPreview(); });
@@ -994,13 +1008,25 @@
 
         // State Polling Loop to track progress and sync physical status intelligently.
         setInterval(async () => {
-            if (!isHomed && !isProcessingQueue && currentPos.x === 0) return;
             try {
                 const res = await fetch('/api/state');
                 const data = await res.json();
 
+                // Dynamic UI locking tied instantly to real Backend Homing status
+                if (data.is_homed && !isHomed) {
+                    isHomed = true;
+                    document.getElementById('movement-controls').style.opacity = '1';
+                    document.getElementById('movement-controls').style.pointerEvents = 'auto';
+                    update3DVisualizer(data.position.x, data.position.y, data.position.z);
+                    predictedPos = {...data.position};
+                } else if (!data.is_homed && isHomed) {
+                    isHomed = false;
+                    document.getElementById('movement-controls').style.opacity = '0.5';
+                    document.getElementById('movement-controls').style.pointerEvents = 'none';
+                }
+
                 if (data.is_homed) {
-                    // Update positional tracker
+                    // Update positional tracker continuously unless we are moving queue sequences
                     if (!isProcessingQueue && manualQueue.length === 0) {
                         update3DVisualizer(data.position.x, data.position.y, data.position.z);
                     }

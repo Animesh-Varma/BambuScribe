@@ -1,8 +1,9 @@
 # BAMBUSCRIBE
 **An open-source suite to transform your Bambu Lab 3D printer into a precision 2D plotter**
 
-[![Version](https://img.shields.io/badge/Version-v1.1.0-blue?style=flat-square)](#)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg?style=flat-square)](#)
+![Version](https://img.shields.io/badge/Version-v1.1.1-blue?style=flat-square)
+![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg?style=flat-square)
+[![Demo Video](https://img.shields.io/badge/YouTube-Watch_Demo-red?style=flat-square&logo=youtube)](https://youtu.be/aic8SkLXlUo)
 
 Bambu Lab printers possess incredibly fast, precise CoreXY kinematics. While they are phenomenal at extruding plastic, that same hardware is perfect for high-speed 2D plotting, drawing, and vector art. 
 
@@ -65,7 +66,21 @@ One thing I noticed with existing mounts is that the pen is physically offset fr
 
 BambuScribe's processing engine is fully featured and capable of handling complex image algorithms and typography with precision. All image generation constraints have been resolved and implemented beautifully.
 
+### Video Demo
+
+See BambuScribe (v1.1.0) in action! Watch the demonstration video on YouTube:
+
+<div align="center">
+  <a href="https://youtu.be/aic8SkLXlUo">
+    <img src="https://markdown-videos-api.jorgenkh.no/youtube/aic8SkLXlUo" alt="BambuScribe YouTube Demo Video">
+  </a>
+  <br>
+  <i>Click the thumbnail above to watch the demo video!</i>
+</div>
+<br>
+
 ### Image Styles
+
 <div align="center">
 
 | Original Reference |            Crosshatching <br>*(Supports down to 0.1mm, shot at ~0.6mm)*             | Stippling (TSP) | Edge / Line Art |
@@ -74,6 +89,7 @@ BambuScribe's processing engine is fully featured and capable of handling comple
 </div>
 
 ### Typography & Text Engine
+
 <div align="center">
   <img src="assets/showcase_text.jpg" alt="Text Styles on Paper" width="600">
   <br><br>
@@ -87,9 +103,11 @@ BambuScribe's processing engine is fully featured and capable of handling comple
 ## How It Works
 
 ### **The SD Handoff Pipeline**
+
 When running autonomously, BambuScribe packages the raw plotted G-code into a standard `.3mf` ZIP archive containing metadata files (`[Content_Types].xml` and `slice_info.config`) to prevent the printer's touchscreen parser from crashing. It then connects to the printer via a secure FTP client on port 990, uploads the archive, and sends an MQTT `project_file` command to trigger the plot.
 
 ### **The Streaming Pipeline**
+
 If running in live-stream mode, BambuScribe utilizes a **Custom Chunking Pipeline**. Because a printer's internal buffer will choke if you send a 50,000-line G-code file all at once over MQTT, the backend groups the paths into timed chunks, tracking acknowledgments from the printer to feed the buffer smoothly.
 
 ---
@@ -138,11 +156,13 @@ Please read these carefully before using the software:
 *(Please note: There is no rigidly decided path forward. These features are just divided into phases for convenience and structure.)*
 
 ### **Core Formats & Hardware**
+
 - **SVG & Document Support:** Bypass the internal engines entirely to upload pre-made vector art (.svg) and multi-page text documents (.pdf, .docx).
 - **Custom Pen Hardware:** Designing and publishing a original, optimized 3D-printed screw mount to center the pen and fix the nozzle offset.
 - **Multi-Color Support:** Adding pause sequences and UI prompts to allow for manual pen swapping for multi-colored plots.
 
 ### **Intelligence & Expansion**
+
 - **Audio Cues & Sound Support:** Implementing auditory alerts and system pings for finished plots, manual pen swaps, or hardware boundary errors.
 - **Expanded Image Algorithms:** Adding advanced dithering algorithms, halftone dots, and multi-pass CMYK color separation for images to offer even more creative choices.
 - **Skew & Surface Interpolation:** Upgrading the bounding box math to support full affine transformations (skewing/warping text to match an angled bounding box) and 3D Z-height interpolation across all 4 corners to adapt to unlevel drawing planes.
@@ -206,4 +226,5 @@ Email: `animesh_varma@protonmail.com`
 ---
 
 ## Disclaimer
+
 Please take care and monitor your machine while using BambuScribe! Although the software requires homing before any movement and has strict guardrails in place, nothing is completely foolproof. Negligence could potentially lead to physical damage to your 3D printer or build plate. Always double-check everything manually, ensure your pen mount is properly secured, and have fun plotting!
