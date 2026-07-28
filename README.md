@@ -3,6 +3,7 @@
 
 [![Version](https://img.shields.io/badge/Version-v1.1.0-blue?style=flat-square)](#)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg?style=flat-square)](#)
+[![Demo Video](https://img.shields.io/badge/YouTube-Watch_Demo-red?style=flat-square&logo=youtube)](https://youtu.be/aic8SkLXlUo)
 
 Bambu Lab printers possess incredibly fast, precise CoreXY kinematics. While they are phenomenal at extruding plastic, that same hardware is perfect for high-speed 2D plotting, drawing, and vector art. 
 
@@ -64,6 +65,18 @@ One thing I noticed with existing mounts is that the pen is physically offset fr
 ## Showcase
 
 BambuScribe's processing engine is fully featured and capable of handling complex image algorithms and typography with precision. All image generation constraints have been resolved and implemented beautifully.
+
+### Video Demo
+See BambuScribe (v1.1.0) in action! Watch the demonstration video on YouTube:
+
+<div align="center">
+  <a href="https://youtu.be/aic8SkLXlUo">
+    <img src="https://markdown-videos-api.jorgenkh.no/youtube/aic8SkLXlUo" alt="BambuScribe YouTube Demo Video">
+  </a>
+  <br>
+  <i>Click the thumbnail above to watch the demo video!</i>
+</div>
+<br>
 
 ### Image Styles
 <div align="center">
