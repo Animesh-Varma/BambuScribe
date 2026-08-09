@@ -1,3 +1,5 @@
+
+
 # BAMBUSCRIBE
 **An open-source suite to transform your Bambu Lab 3D printer into a precision 2D plotter**
 
@@ -32,7 +34,7 @@ One thing I noticed with existing mounts is that the pen is physically offset fr
 
 ---
 
-<h3 align="center">Contents</h2>
+<h3 align="center">Contents</h3>
 
 <p align="center">
   <a href="#features">Features</a> •
