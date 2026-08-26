@@ -34,22 +34,35 @@
             --text-color: #191C1D;
             --border-color: #e0e0e0;
             --canvas-bg: #eef2f3;
+
+            /* Material Web Component Tokens (Light) */
             --md-sys-color-primary: #006874;
             --md-sys-color-on-primary: #ffffff;
             --md-sys-color-secondary-container: #cce8e7;
             --md-sys-color-on-secondary-container: #004f58;
+            --md-sys-color-surface: #ffffff;
+            --md-sys-color-on-surface: #191C1D;
+            --md-sys-color-surface-container: #f4f6f6;
+            --md-sys-color-on-surface-variant: #3f484a;
         }
 
         body.dark-mode {
+            color-scheme: dark;
             --bg-color: #1a1c1e;
             --surface-color: #202427;
             --text-color: #e2e2e6;
             --border-color: #41474d;
             --canvas-bg: #2a2d31;
+
+            /* Material Web Component Tokens (Dark) */
             --md-sys-color-primary: #4fd8eb;
             --md-sys-color-on-primary: #00363d;
             --md-sys-color-secondary-container: #004f58;
             --md-sys-color-on-secondary-container: #cce8e7;
+            --md-sys-color-surface: #202427;
+            --md-sys-color-on-surface: #e2e2e6;
+            --md-sys-color-surface-container: #2a2d31;
+            --md-sys-color-on-surface-variant: #bfc8ca;
         }
 
         body { font-family: 'Roboto', sans-serif; background-color: var(--bg-color); color: var(--text-color); margin: 0; padding: 20px; transition: background-color 0.3s, color 0.3s; }
@@ -64,9 +77,9 @@
         #canvas-container { width: 100%; height: 400px; background: var(--canvas-bg); border-radius: 12px; overflow: hidden; cursor: grab;}
         #canvas-container:active { cursor: grabbing; }
 
-        .controls-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; text-align: center; margin-top: 10px; }
-        .step-selector { margin: 20px 0; display: flex; gap: 12px; align-items: center; justify-content: center; background: var(--bg-color); padding: 16px; border-radius: 16px; border: 1px solid var(--border-color); }
-        .axis-controls { display: flex; flex-direction: column; gap: 12px; background: var(--bg-color); padding: 16px; border-radius: 16px; border: 1px solid var(--border-color); }
+        .controls-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; text-align: center; margin-top: 10px; color: var(--text-color); }
+        .step-selector { margin: 20px 0; display: flex; gap: 12px; align-items: center; justify-content: center; background: var(--bg-color); padding: 16px; border-radius: 16px; border: 1px solid var(--border-color); color: var(--text-color); }
+        .axis-controls { display: flex; flex-direction: column; gap: 12px; background: var(--bg-color); padding: 16px; border-radius: 16px; border: 1px solid var(--border-color); color: var(--text-color); }
 
         .camera-container { width: 100%; height: 500px; background: #000; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: #fff; overflow: hidden; }
         #camera-stream { width: 100%; height: 100%; object-fit: contain; }
@@ -867,21 +880,28 @@
                 if (data.status === 'success') {
                     textPathsGroup.clear();
                     const inkColor = document.body.classList.contains('dark-mode') ? 0x4fd8eb : 0x006874;
-                    const points = [];
+                    const outColor = 0xff0000; // Red for segments outside limits
+
                     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
 
-                    data.paths.forEach(segment => {
-                        points.push(new THREE.Vector3(segment[0].x - BED_SIZE/2, data.origin_z, BED_SIZE/2 - segment[0].y));
-                        points.push(new THREE.Vector3(segment[1].x - BED_SIZE/2, data.origin_z, BED_SIZE/2 - segment[1].y));
-                        minX = Math.min(minX, segment[0].x, segment[1].x);
-                        maxX = Math.max(maxX, segment[0].x, segment[1].x);
-                        minY = Math.min(minY, segment[0].y, segment[1].y);
-                        maxY = Math.max(maxY, segment[0].y, segment[1].y);
-                    });
+                    const addPathGroup = (pathList, color) => {
+                        if (!pathList || pathList.length === 0) return;
+                        const points = [];
+                        pathList.forEach(segment => {
+                            points.push(new THREE.Vector3(segment[0].x - BED_SIZE/2, data.origin_z, BED_SIZE/2 - segment[0].y));
+                            points.push(new THREE.Vector3(segment[1].x - BED_SIZE/2, data.origin_z, BED_SIZE/2 - segment[1].y));
+                            minX = Math.min(minX, segment[0].x, segment[1].x);
+                            maxX = Math.max(maxX, segment[0].x, segment[1].x);
+                            minY = Math.min(minY, segment[0].y, segment[1].y);
+                            maxY = Math.max(maxY, segment[0].y, segment[1].y);
+                        });
+                        const geo = new THREE.BufferGeometry().setFromPoints(points);
+                        const mat = new THREE.LineBasicMaterial({ color: color });
+                        textPathsGroup.add(new THREE.LineSegments(geo, mat));
+                    };
 
-                    const geo = new THREE.BufferGeometry().setFromPoints(points);
-                    const mat = new THREE.LineBasicMaterial({ color: inkColor });
-                    textPathsGroup.add(new THREE.LineSegments(geo, mat));
+                    addPathGroup(data.paths, inkColor);
+                    addPathGroup(data.out_paths, outColor); // Draw out_paths in pure red
 
                     if (currentMode === 'image') {
                         const canvas = document.getElementById('preview-2d');
@@ -895,14 +915,22 @@
                             const scale = Math.min(canvas.width / w, canvas.height / h) * 0.9;
                             ctx.save();
                             ctx.translate(canvas.width/2 - (w/2)*scale, canvas.height/2 - (h/2)*scale);
-                            ctx.beginPath();
-                            data.paths.forEach(s => {
-                                ctx.moveTo((s[0].x - minX) * scale, (maxY - s[0].y) * scale);
-                                ctx.lineTo((s[1].x - minX) * scale, (maxY - s[1].y) * scale);
-                            });
-                            ctx.strokeStyle = document.body.classList.contains('dark-mode') ? '#4fd8eb' : '#006874';
                             ctx.lineWidth = 0.5;
-                            ctx.stroke();
+
+                            const drawLines = (pathList, colorStyle) => {
+                                if (!pathList) return;
+                                ctx.beginPath();
+                                pathList.forEach(s => {
+                                    ctx.moveTo((s[0].x - minX) * scale, (maxY - s[0].y) * scale);
+                                    ctx.lineTo((s[1].x - minX) * scale, (maxY - s[1].y) * scale);
+                                });
+                                ctx.strokeStyle = colorStyle;
+                                ctx.stroke();
+                            };
+
+                            drawLines(data.paths, document.body.classList.contains('dark-mode') ? '#4fd8eb' : '#006874');
+                            drawLines(data.out_paths, '#ff0000'); // Red 2D Canvas lines
+
                             ctx.restore();
                         }
                     }

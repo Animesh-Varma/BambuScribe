@@ -576,11 +576,6 @@ def generate_text_paths(text, font_style, line_gap_mm, font_pct, min_x, max_x, m
     if not final_paths:
         return None, "Text is empty or completely exceeds bounding box bounds."
 
-    for segment in final_paths:
-        for pt in segment:
-            if pt['x'] < min_x - 0.5 or pt['x'] > max_x + 0.5 or pt['y'] < min_y - 0.5 or pt['y'] > max_y + 0.5:
-                return None, "Text exceeds the bounding box! Please use Auto-Wrap, reduce scale, or increase bounding box size."
-
     return final_paths, "Success"
 
 
@@ -766,19 +761,65 @@ def gen_canny(img_pil, box_w, box_h, min_x, max_x, min_y, max_y):
     return paths
 
 
+def split_segment_by_bbox(p1, p2, xmin, xmax, ymin, ymax):
+    """Slice a segment perfectly where it crosses the mathematical bounding box boundaries."""
+    dx = p2['x'] - p1['x']
+    dy = p2['y'] - p1['y']
+
+    t_values = [0.0, 1.0]
+
+    if dx != 0:
+        tx1 = (xmin - p1['x']) / dx
+        if 0 < tx1 < 1: t_values.append(tx1)
+        tx2 = (xmax - p1['x']) / dx
+        if 0 < tx2 < 1: t_values.append(tx2)
+
+    if dy != 0:
+        ty1 = (ymin - p1['y']) / dy
+        if 0 < ty1 < 1: t_values.append(ty1)
+        ty2 = (ymax - p1['y']) / dy
+        if 0 < ty2 < 1: t_values.append(ty2)
+
+    t_values.sort()
+    in_segs, out_segs = [], []
+    eps = 1e-6
+
+    for i in range(len(t_values) - 1):
+        tA = t_values[i]
+        tB = t_values[i + 1]
+        if tB - tA < 1e-7:
+            continue
+
+        t_mid = (tA + tB) / 2.0
+        mid_x = p1['x'] + t_mid * dx
+        mid_y = p1['y'] + t_mid * dy
+
+        seg = [
+            {"x": p1['x'] + tA * dx, "y": p1['y'] + tA * dy},
+            {"x": p1['x'] + tB * dx, "y": p1['y'] + tB * dy}
+        ]
+
+        if (xmin - eps <= mid_x <= xmax + eps) and (ymin - eps <= mid_y <= ymax + eps):
+            in_segs.append(seg)
+        else:
+            out_segs.append(seg)
+
+    return in_segs, out_segs
+
+
 def process_paths_request(data):
-    """Central router that generates line paths."""
+    """Central router that generates line paths and bounds them exactly."""
     bbox = data.get('bbox')
     bed_size = float(data.get('bed_size', 180.0))
     if not bbox:
-        return None, "Set Bounding Box (4 points) first."
+        return None, None, "Set Bounding Box (4 points) first."
 
     min_x, max_x = float(bbox['min_x']), float(bbox['max_x'])
     min_y, max_y = float(bbox['min_y']), float(bbox['max_y'])
     box_w, box_h = max_x - min_x, max_y - min_y
 
     if box_w <= 0 or box_h <= 0:
-        return None, "Invalid Bounding Box Area"
+        return None, None, "Invalid Bounding Box Area"
 
     paths = []
     if data['type'] == 'text':
@@ -787,7 +828,7 @@ def process_paths_request(data):
             data['font_size'], min_x, max_x, min_y, max_y, data.get('auto_wrap', True)
         )
         if not paths:
-            return None, msg
+            return None, None, msg
     else:
         method = data.get('method', 'hatch')
         try:
@@ -810,9 +851,6 @@ def process_paths_request(data):
                     paths.append([{"x": p1x, "y": p1y}, {"x": p2x, "y": p2y}])
             else:
                 img, px_w, px_h, ppm, original_final_w, original_final_h = prepare_image(img_pil, box_w, box_h)
-
-                # Scale bounds cleanly and adjust pixel-per-mm density inversely to enable
-                # flawless scaling around exactly the center position relative to user offset parameters
                 scaled_w = original_final_w * img_scale
                 scaled_h = original_final_h * img_scale
                 ox = min_x + (box_w - scaled_w) / 2.0 + offset_x
@@ -826,16 +864,23 @@ def process_paths_request(data):
                     paths = gen_hatch(img, px_w, px_h, effective_ppm, scaled_w, float(data['img_gap']), ox, oy)
 
         except Exception as e:
-            return None, str(e)
+            return None, None, str(e)
+
+    in_paths = []
+    out_paths = []
+    for seg in paths:
+        i_segs, o_segs = split_segment_by_bbox(seg[0], seg[1], min_x, max_x, min_y, max_y)
+        in_paths.extend(i_segs)
+        out_paths.extend(o_segs)
 
     if data.get('draw_bbox'):
-        paths.append([{"x": min_x, "y": min_y}, {"x": max_x, "y": min_y}])
-        paths.append([{"x": max_x, "y": min_y}, {"x": max_x, "y": max_y}])
-        paths.append([{"x": max_x, "y": max_y}, {"x": min_x, "y": max_y}])
-        paths.append([{"x": min_x, "y": max_y}, {"x": min_x, "y": min_y}])
+        in_paths.append([{"x": min_x, "y": min_y}, {"x": max_x, "y": min_y}])
+        in_paths.append([{"x": max_x, "y": min_y}, {"x": max_x, "y": max_y}])
+        in_paths.append([{"x": max_x, "y": max_y}, {"x": min_x, "y": max_y}])
+        in_paths.append([{"x": min_x, "y": max_y}, {"x": min_x, "y": min_y}])
 
     safe_paths = []
-    for seg in paths:
+    for seg in in_paths:
         x1 = max(0.0, min(bed_size, seg[0]['x']))
         y1 = max(0.0, min(bed_size, seg[0]['y']))
         x2 = max(0.0, min(bed_size, seg[1]['x']))
@@ -845,16 +890,14 @@ def process_paths_request(data):
             continue
         safe_paths.append([{"x": x1, "y": y1}, {"x": x2, "y": y2}])
 
-    return safe_paths, "Success"
-
+    return safe_paths, out_paths, "Success"
 
 @app.route('/api/preview', methods=['POST'])
 def preview_paths():
-    """Endpoint for UI to fetch calculated paths for 3D visualizer representation."""
-    paths, msg = process_paths_request(request.json)
+    paths, out_paths, msg = process_paths_request(request.json)
     if paths is None:
         return jsonify({"status": "error", "message": msg}), 400
-    return jsonify({"status": "success", "paths": paths, "origin_z": request.json.get('bbox', {}).get('origin_z')})
+    return jsonify({"status": "success", "paths": paths, "out_paths": out_paths, "origin_z": request.json.get('bbox', {}).get('origin_z')})
 
 
 def generate_full_gcode(paths, base_z, speed, z_hop, bed_size):
@@ -1039,7 +1082,7 @@ def plot_paths_sd():
             return jsonify({"status": "error", "message": "A plot is already running!"}), 400
 
         data = request.json
-        paths, msg = process_paths_request(data)
+        paths, out_paths, msg = process_paths_request(data)
         if paths is None:
             return jsonify({"status": "error", "message": msg}), 400
 
@@ -1094,7 +1137,7 @@ def plot_paths():
             return jsonify({"status": "error", "message": "A plot is already running!"}), 400
 
         data = request.json
-        paths, msg = process_paths_request(data)
+        paths, out_paths, msg = process_paths_request(data)
         if paths is None:
             return jsonify({"status": "error", "message": msg}), 400
 
