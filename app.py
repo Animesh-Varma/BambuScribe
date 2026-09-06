@@ -117,6 +117,8 @@ def preview_paths():
 def plot_paths_sd():
     with state.state_lock:
         if state.is_busy(): return jsonify({"status": "error", "message": "A plot is already running!"}), 400
+        if not state.printer_state.get("is_homed"):
+            return jsonify({"status": "error", "message": "Home the printer first before starting a direct plot!"}), 403
         data = request.json
         paths, out_paths, msg = process_paths_request(data)
         if paths is None: return jsonify({"status": "error", "message": msg}), 400
@@ -126,12 +128,35 @@ def plot_paths_sd():
             if speed <= 0 or z_hop < 0 or bed_size <= 0 or not (0 <= origin_z <= bed_size): raise ValueError()
         except Exception: return jsonify({"status": "error", "message": "Invalid plotting parameters."}), 400
 
-        gcode_str = generate_full_gcode(paths, origin_z, speed, z_hop, bed_size)
+        gcode_str = generate_full_gcode(paths, origin_z, speed, z_hop, bed_size, is_download=False)
         state.plot_active, state.plot_paused = True, False
         state.printer_state.update({"progress": 0, "status": "Uploading"})
         state.save_state()
         threading.Thread(target=execute_plot_sd_wrapper, args=(gcode_str,)).start()
         return jsonify({"status": "success"})
+
+@app.route('/api/download_gcode', methods=['POST'])
+def download_gcode():
+    data = request.json
+    paths, out_paths, msg = process_paths_request(data)
+    if paths is None: return jsonify({"status": "error", "message": msg}), 400
+    try:
+        speed = min(float(data.get('speed', 12000)), 18000.0)
+        z_hop = float(data.get('z_hop', 4.0))
+        bed_size = float(data.get('bed_size', 180.0))
+        origin_z = float(data.get('bbox', {}).get('origin_z', 0.0))
+        if speed <= 0 or z_hop < 0 or bed_size <= 0 or not (0 <= origin_z <= bed_size): raise ValueError()
+    except Exception:
+        return jsonify({"status": "error", "message": "Invalid plotting parameters."}), 400
+
+    # is_download=True injects the 4-step sequence (Warning Pause -> G28 -> Energized Pause -> Plot)
+    gcode_str = generate_full_gcode(paths, origin_z, speed, z_hop, bed_size, is_download=True)
+
+    return Response(
+        gcode_str,
+        mimetype="text/plain",
+        headers={"Content-disposition": "attachment; filename=bambuscribe_plot.gcode"}
+    )
 
 def execute_plot_wrapper(paths, base_z, speed, z_hop, bed_size):
     try:
@@ -148,6 +173,8 @@ def execute_plot_wrapper(paths, base_z, speed, z_hop, bed_size):
 def plot_paths():
     with state.state_lock:
         if state.is_busy(): return jsonify({"status": "error", "message": "A plot is already running!"}), 400
+        if not state.printer_state.get("is_homed"):
+            return jsonify({"status": "error", "message": "Home the printer first before starting a direct plot!"}), 403
         data = request.json
         paths, out_paths, msg = process_paths_request(data)
         if paths is None: return jsonify({"status": "error", "message": msg}), 400

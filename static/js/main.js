@@ -141,6 +141,7 @@ window.clearImage = function() {
     document.getElementById('img-input').value = '';
     visualizer.clearPaths();
     document.getElementById('btn-plot').disabled = true;
+    document.getElementById('btn-download').disabled = true;
 }
 
 document.getElementById('img-gap').addEventListener('input', (e) => { document.getElementById('label-gap').innerText = parseFloat(e.target.value).toFixed(1) + ' mm'; saveImgSettings(); autoPreview(); });
@@ -262,6 +263,7 @@ document.getElementById('btn-origin').addEventListener('click', () => {
         renderBBoxList();
         visualizer.clearPaths();
         document.getElementById('btn-plot').disabled = true;
+        document.getElementById('btn-download').disabled = true;
     }
 });
 
@@ -370,9 +372,6 @@ async function triggerPreview() {
     if(!payload) { if (bboxPoints.length !== 4) showWarning("Set 4-point Bounding Box first!"); return; }
 
     isPreviewing = true;
-    const btnPreview = document.getElementById('btn-preview');
-    const originalText = btnPreview.innerHTML;
-    btnPreview.innerHTML = `<md-icon slot="icon">sync</md-icon> Calculating...`;
 
     try {
         const res = await fetch('/api/preview', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
@@ -421,17 +420,28 @@ async function triggerPreview() {
                 }
             }
             document.getElementById('btn-plot').disabled = false;
+            document.getElementById('btn-download').disabled = false;
         } else showWarning(data.message);
     } catch (err) {}
 
-    btnPreview.innerHTML = originalText;
     isPreviewing = false;
     if (pendingPreview) { pendingPreview = false; triggerPreview(); }
 }
 
-document.getElementById('btn-preview').addEventListener('click', triggerPreview);
+function showHomeErrorPopup(msg) {
+    const modal = document.getElementById('home-error-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+    } else {
+        alert(msg || "Home the printer first before starting a direct plot!");
+    }
+}
 
 document.getElementById('btn-plot').addEventListener('click', () => {
+    if (!isHomed) {
+        showHomeErrorPopup("Home the printer first before starting a direct plot!");
+        return;
+    }
     if(!confirm("Ready to draw? Ensure pen is lowered and paper is secure!")) return;
     const modal = document.getElementById('plot-method-modal');
     modal.style.display = 'flex';
@@ -469,20 +479,87 @@ document.getElementById('plot-method-modal').addEventListener('keydown', (e) => 
     }
 });
 
+document.getElementById('download-modal').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        window.closeDownloadModal();
+    } else {
+        trapFocus(document.getElementById('download-modal'), e);
+    }
+});
+
 document.getElementById('model-modal').addEventListener('keydown', (e) => {
     trapFocus(document.getElementById('model-modal'), e);
 });
 
+window.downloadGCode = function() {
+    const payload = getPayload();
+    if (!payload) return;
+    document.getElementById('download-modal').style.display = 'flex';
+    setTimeout(() => document.querySelector('#download-modal md-filled-button').focus(), 50);
+};
+
+window.closeDownloadModal = function() {
+    document.getElementById('download-modal').style.display = 'none';
+    document.getElementById('btn-download').focus();
+};
+
+window.confirmDownloadGCode = async function() {
+    const payload = getPayload();
+    if (!payload) return;
+
+    document.getElementById('download-modal').style.display = 'none';
+
+    const btnDownload = document.getElementById('btn-download');
+    const originalText = btnDownload.innerHTML;
+    btnDownload.innerHTML = `<md-icon slot="icon">hourglass_empty</md-icon> Generating...`;
+    btnDownload.disabled = true;
+
+    try {
+        const response = await fetch('/api/download_gcode', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const data = await response.json();
+            showWarning(data.message || "Download failed.");
+        } else {
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = 'bambuscribe_plot.gcode';
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+    } catch (e) {
+        showWarning("Error: " + e.message);
+    }
+
+    btnDownload.innerHTML = originalText;
+    btnDownload.disabled = false;
+};
+
 window.startPlot = async function(method) {
     document.getElementById('plot-method-modal').style.display = 'none';
     document.getElementById('btn-plot').style.display = 'none';
-    document.getElementById('btn-preview').style.display = 'none';
+    document.getElementById('btn-download').style.display = 'none';
     document.getElementById('btn-estop').style.display = 'inline-flex';
 
     try {
         const res = await fetch(method === 'stream' ? '/api/plot' : '/api/plot_sd', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(getPayload()) });
         const data = await res.json();
-        if (data.status !== 'success') { showWarning(data.message); resetPlottingUI(); }
+        if (data.status !== 'success') {
+            if (data.message && data.message.includes("Home the printer first")) {
+                showHomeErrorPopup(data.message);
+            } else {
+                showWarning(data.message);
+            }
+            resetPlottingUI();
+        }
     } catch(e) { showWarning("Error: " + e.message); resetPlottingUI(); }
 };
 
@@ -498,7 +575,7 @@ function resetPlottingUI() {
     document.getElementById('btn-pause').style.display = 'none';
     document.getElementById('btn-resume').style.display = 'none';
     document.getElementById('btn-estop').style.display = 'none';
-    document.getElementById('btn-preview').style.display = 'inline-flex';
+    document.getElementById('btn-download').style.display = 'inline-flex';
     document.getElementById('btn-plot').style.display = 'inline-flex';
     document.getElementById('progress-container').style.display = 'none';
     document.getElementById('progress-bar').style.background = 'var(--md-sys-color-primary)';

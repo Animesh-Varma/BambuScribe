@@ -42,6 +42,54 @@
         </div>
     </div>
 
+    <div id="download-modal" role="dialog" aria-modal="true" aria-labelledby="download-modal-title" style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; display:none; align-items:center; justify-content:center;">
+        <div style="background:var(--surface-color); padding:32px; border-radius:24px; max-width:560px; box-shadow: 0 8px 24px rgba(0,0,0,0.2);">
+            <h2 id="download-modal-title" style="margin-top:0; display:flex; align-items:center; gap:8px;"><md-icon style="color:var(--md-sys-color-primary);">info</md-icon> Standalone Plot Instructions</h2>
+            <div style="margin-bottom:24px; color:var(--text-color); font-size:15px; line-height:1.5;">
+                <p>Because this file will be executed directly from the printer, it contains an automated safety sequence:</p>
+
+                <div style="margin: 14px 0; padding: 10px 14px; background: rgba(211, 47, 47, 0.1); border-left: 4px solid #d32f2f; border-radius: 6px; font-size: 14px;">
+                    <strong>Crucial:</strong> <b>Auto Bed Leveling</b>, <b>Timelapse</b>, <b>Flow Calibration</b>, and any other pre-print add-ons or calibrations <b>MUST</b> be toggled OFF when starting this print to prevent toolhead collisions.
+                </div>
+
+                <ol style="margin-top: 10px; padding-left: 20px; display: flex; flex-direction: column; gap: 10px;">
+                    <li>Transfer the downloaded <b>.gcode</b> file onto the printer's MicroSD card, make sure all calibrations/add-ons are unchecked, and start the job.</li>
+                    <li><strong>Pause 1 (Safety Warning):</strong> The printer will immediately pause. Make sure your pen/attachment is <b>REMOVED</b> so it does not collide with the bed, then press <b>Resume</b>.</li>
+                    <li><strong>Homing:</strong> The machine will safely home all axes and move the toolhead to the side.</li>
+                    <li><strong>Pause 2 (Energized Setup):</strong> The printer will pause again with <b>motors locked</b>. Mount your paper and pen, set your contact height, and press <b>Resume</b> to plot!</li>
+                </ol>
+
+                <p style="margin-top: 14px; margin-bottom: 0; font-size: 13.5px; opacity: 0.85;">
+                    <b>Note:</b> Long pauses after pressing <b>Resume</b> are completely normal while the firmware processes commands.
+                </p>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:12px;">
+                <md-outlined-button onclick="closeDownloadModal()">Cancel</md-outlined-button>
+                <md-filled-button onclick="confirmDownloadGCode()"><md-icon slot="icon">download</md-icon> Got it, Download</md-filled-button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Home Error Popup Modal -->
+    <div id="home-error-modal" role="dialog" aria-modal="true" aria-labelledby="home-error-title" aria-describedby="home-error-desc" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.32); backdrop-filter: blur(2px); z-index: 10000; display: none; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box;">
+        <div style="background: var(--md-sys-color-surface-container-high, var(--surface-color, #ece6f0)); padding: 28px 24px 24px 24px; border-radius: 28px; width: 100%; max-width: 340px; box-shadow: 0 6px 10px rgba(0, 0, 0, 0.14); box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch;">
+
+            <h2 id="home-error-title" style="margin: 0 auto 12px auto; width: 100%; display: flex; justify-content: center; text-align: center !important; font-family: Roboto, system-ui, sans-serif; font-size: 22px; font-weight: 500; line-height: 28px; color: #e57373;">
+                Homing Required
+            </h2>
+
+            <p id="home-error-desc" style="margin: 0 0 24px 0; width: 100%; text-align: center !important; font-family: Roboto, system-ui, sans-serif; font-size: 14px; font-weight: 400; line-height: 20px; color: var(--md-sys-color-on-surface-variant, #49454f);">
+                Home the printer first before starting a direct plot.
+            </p>
+
+            <div style="display: flex; width: 100%;">
+                <md-filled-button style="width: 100%;" onclick="document.getElementById('home-error-modal').style.display='none'">
+                    Got it
+                </md-filled-button>
+            </div>
+        </div>
+    </div>
+
     <div class="header">
         <h1>BambuScribe</h1>
         <md-icon-button id="theme-toggle"><md-icon>dark_mode</md-icon></md-icon-button>
@@ -225,7 +273,7 @@
             </div>
 
             <div style="display: flex; gap: 16px; justify-content: flex-end; margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 20px;">
-                <md-outlined-button id="btn-preview"><md-icon slot="icon">visibility</md-icon> Preview</md-outlined-button>
+                <md-outlined-button id="btn-download" disabled onclick="downloadGCode()"><md-icon slot="icon">download</md-icon> Download .3mf</md-outlined-button>
                 <md-filled-button id="btn-plot" disabled><md-icon slot="icon">play_arrow</md-icon> Start Plotting!</md-filled-button>
                 <md-filled-button id="btn-pause" style="display: none;"><md-icon slot="icon">pause</md-icon> Pause</md-filled-button>
                 <md-filled-button id="btn-resume" style="display: none;"><md-icon slot="icon">play_arrow</md-icon> Resume</md-filled-button>

@@ -169,8 +169,14 @@ def upload_to_printer(file_bytes, filename="bambuscribe_plot.gcode.3mf"):
             pass
 
 
-def execute_plot_sd_wrapper(gcode_str):
+def execute_plot_sd_wrapper(gcode_data):
     try:
+        # Automatically handle bytes or string depending on app.py state
+        if isinstance(gcode_data, bytes):
+            gcode_str = gcode_data.decode('utf-8')
+        else:
+            gcode_str = gcode_data
+
         gcode_str = gcode_str.replace('\r\n', '\n') + "\n"
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
@@ -197,6 +203,7 @@ def execute_plot_sd_wrapper(gcode_str):
 
         state.sequence_id_counter += 1
         seq_id = str(state.sequence_id_counter)
+
         payload = {
             "print": {
                 "sequence_id": seq_id, "command": "project_file", "param": "Metadata/plate_1.gcode",
@@ -241,14 +248,23 @@ def execute_plot(paths, base_z, speed, z_hop, bed_size):
     speed = int(speed)
     hop_z = min(base_z + z_hop, bed_size)
     mid = float(bed_size) / 2.0
+    bed_max = float(bed_size)
     SAFE_Z_FEEDRATE, SAFE_XY_FEEDRATE = min(speed, 1200), min(speed, 18000)
     z_time_hop = (abs(hop_z - base_z) / (SAFE_Z_FEEDRATE / 60.0)) + 0.05
+
     timed_commands = [
-        {"cmd": "M17", "time": 0.1}, {"cmd": "G90", "time": 0.1},
+        {"cmd": "M73 P0 R1", "time": 0.1},
+        {"cmd": "M104 S0", "time": 0.1},
+        {"cmd": "M140 S0", "time": 0.1},
+        {"cmd": "M106 S0", "time": 0.1},
+        {"cmd": "M17", "time": 0.1},
+        {"cmd": "G90", "time": 0.1},
+        {"cmd": "M83", "time": 0.1},
         {"cmd": f"G1 Z90 F{SAFE_Z_FEEDRATE}", "time": 1.5},
         {"cmd": f"G0 X{mid:.1f} Y{mid:.1f} F{SAFE_XY_FEEDRATE}", "time": 1.5},
         {"cmd": "M400", "time": 0.1}
     ]
+
     current_pos = {"x": mid, "y": mid}
 
     def is_close(pA, pB):
@@ -259,29 +275,30 @@ def execute_plot(paths, base_z, speed, z_hop, bed_size):
         if not is_close(current_pos, p1):
             dist = math.hypot(p1['x'] - current_pos['x'], p1['y'] - current_pos['y'])
             timed_commands.extend([
-                {"cmd": "M400", "time": 0.05}, {"cmd": f"G1 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}", "time": z_time_hop},
                 {"cmd": "M400", "time": 0.05},
-                {"cmd": f"G0 X{p1['x']:.2f} Y{p1['y']:.2f} F{SAFE_XY_FEEDRATE}",
-                 "time": (dist / (SAFE_XY_FEEDRATE / 60.0)) + 0.05},
-                {"cmd": "M400", "time": 0.05}, {"cmd": f"G1 Z{base_z:.2f} F{SAFE_Z_FEEDRATE}", "time": z_time_hop},
+                {"cmd": f"G1 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}", "time": z_time_hop},
+                {"cmd": "M400", "time": 0.05},
+                {"cmd": f"G0 X{p1['x']:.2f} Y{p1['y']:.2f} F{SAFE_XY_FEEDRATE}", "time": (dist / (SAFE_XY_FEEDRATE / 60.0)) + 0.05},
+                {"cmd": "M400", "time": 0.05},
+                {"cmd": f"G1 Z{base_z:.2f} F{SAFE_Z_FEEDRATE}", "time": z_time_hop},
                 {"cmd": "M400", "time": 0.05}
             ])
         else:
             if abs(current_pos['x'] - p1['x']) > 0.005 or abs(current_pos['y'] - p1['y']) > 0.005:
                 dist = math.hypot(p1['x'] - current_pos['x'], p1['y'] - current_pos['y'])
-                timed_commands.append(
-                    {"cmd": f"G1 X{p1['x']:.2f} Y{p1['y']:.2f} F{speed}", "time": (dist / (speed / 60.0)) + 0.05})
+                timed_commands.append({"cmd": f"G1 X{p1['x']:.2f} Y{p1['y']:.2f} F{speed}", "time": (dist / (speed / 60.0)) + 0.05})
+
         dist = math.hypot(p2['x'] - p1['x'], p2['y'] - p1['y'])
-        timed_commands.append(
-            {"cmd": f"G1 X{p2['x']:.2f} Y{p2['y']:.2f} F{speed}", "time": (dist / (speed / 60.0)) + 0.05})
+        timed_commands.append({"cmd": f"G1 X{p2['x']:.2f} Y{p2['y']:.2f} F{speed}", "time": (dist / (speed / 60.0)) + 0.05})
         current_pos = p2
 
     timed_commands.extend([
-        {"cmd": "M400", "time": 0.1}, {"cmd": f"G1 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}", "time": z_time_hop},
         {"cmd": "M400", "time": 0.1},
-        {"cmd": f"G1 Z90 F{SAFE_Z_FEEDRATE}", "time": 1.5},
-        {"cmd": f"G0 X{mid:.1f} Y{mid:.1f} F{SAFE_XY_FEEDRATE}", "time": 1.5},
-        {"cmd": "M400", "time": 0.1}, {"cmd": "M400 S1", "time": 1.0}
+        {"cmd": f"G1 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}", "time": z_time_hop},
+        {"cmd": f"G1 Z50 F{SAFE_Z_FEEDRATE}", "time": 2.0},
+        {"cmd": f"G0 X{mid:.1f} Y{bed_max - 10:.1f} F{SAFE_XY_FEEDRATE}", "time": 2.0},
+        {"cmd": "M400 S1", "time": 1.0},
+        {"cmd": "M73 P100 R0", "time": 0.1}
     ])
 
     chunks, current_chunk_cmds, current_chunk_time = [], [], 0.0

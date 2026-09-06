@@ -306,30 +306,95 @@ def process_paths_request(data):
 
     return safe_paths, out_paths, "Success"
 
-def generate_full_gcode(paths, base_z, speed, z_hop, bed_size):
-    hop_z = min(base_z + z_hop, bed_size)
+def generate_full_gcode(paths, base_z, speed, z_hop, bed_size, is_download=False):
+    hop_z = min(base_z + z_hop, float(bed_size))
     mid = float(bed_size) / 2.0
+    bed_max = float(bed_size)
     speed = int(speed)
     SAFE_Z_FEEDRATE = int(min(speed, 1200))
     SAFE_XY_FEEDRATE = int(min(speed, 18000))
-    gcode = [
-        "M104 S0 ; turn off nozzle heater", "M140 S0 ; turn off bed heater", "M106 S0 ; turn off fan",
-        "M17", "G90", f"G1 Z90 F{SAFE_Z_FEEDRATE}", f"G0 X{mid:.1f} Y{mid:.1f} F{SAFE_XY_FEEDRATE}", "M400"
-    ]
-    current_pos = {"x": mid, "y": mid}
-    def is_close(pA, pB): return abs(pA['x'] - pB['x']) < 0.03 and abs(pA['y'] - pB['y']) < 0.03
 
-    for segment in paths:
+    if is_download:
+        # Standalone SD file: Alert -> Home -> Energized Pause -> Plot
+        gcode = [
+            "; --- BAMBUSCRIBE AUTONOMOUS PLOTTER GCODE ---",
+            "M73 P0 R1 ; Set progress to 0",
+            "M104 S0 ; turn off nozzle heater",
+            "M140 S0 ; turn off bed heater",
+            "M106 S0 ; turn off fan",
+            "M17 ; Enable steppers",
+            "M84 S0 ; Disable idle timeout (keep motors locked)",
+            "G90 ; Absolute positioning",
+            "M83 ; Relative extrusion",
+            "",
+            "; --- STEP 1: SIGNAL BEFORE HOMING ---",
+            "M400",
+            "M400 U1 ; PAUSE 1: REMOVE PEN/ATTACHMENTS! Press Resume to home",
+            "",
+            "; --- STEP 2: HOMING ---",
+            "G28 ; Home all axes",
+            f"G1 Z50 F{SAFE_Z_FEEDRATE} ; Raise Z for attachment at side parking position",
+            "M400",
+            "",
+            "; --- STEP 3: ENERGIZED PAUSE FOR PEN & PAPER ---",
+            "M17 ; Re-verify motors are locked",
+            "M400 U1 ; PAUSE 2: ATTACH PEN & PAPER! (Motors locked). Press Resume to plot",
+            ""
+        ]
+        current_pos = {"x": None, "y": None}
+    else:
+        # Direct send: already homed & calibrated in app session, start immediately
+        gcode = [
+            "; --- BAMBUSCRIBE PLOTTER GCODE ---",
+            "M73 P0 R1 ; Set progress to 0",
+            "M104 S0 ; turn off nozzle heater",
+            "M140 S0 ; turn off bed heater",
+            "M106 S0 ; turn off fan",
+            "M17 ; Enable steppers",
+            "G90 ; Absolute positioning",
+            "M83 ; Relative extrusion",
+            "",
+            "; --- SETUP & CALIBRATION (DIRECT SEND) ---",
+            f"G1 Z90 F{SAFE_Z_FEEDRATE} ; Raise Z safely before moving",
+            f"G0 X{mid:.1f} Y{mid:.1f} F{SAFE_XY_FEEDRATE} ; Move head to center",
+            "M400",
+            ""
+        ]
+        current_pos = {"x": mid, "y": mid}
+
+    def is_close(pA, pB):
+        return abs(pA['x'] - pB['x']) < 0.03 and abs(pA['y'] - pB['y']) < 0.03
+
+    for i, segment in enumerate(paths):
         p1, p2 = segment[0], segment[1]
-        if not is_close(current_pos, p1):
-            gcode.extend(["M400", f"G1 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}", f"G0 X{p1['x']:.2f} Y{p1['y']:.2f} F{SAFE_XY_FEEDRATE}",
-                          "M400", f"G1 Z{base_z:.2f} F{SAFE_Z_FEEDRATE}", "M400"])
+        if i == 0:
+            gcode.extend([
+                f"G0 X{p1['x']:.2f} Y{p1['y']:.2f} F{SAFE_XY_FEEDRATE}",
+                "M400",
+                f"G1 Z{base_z:.2f} F{SAFE_Z_FEEDRATE}",
+                "M400"
+            ])
+        elif not is_close(current_pos, p1):
+            gcode.extend([
+                "M400",
+                f"G1 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}",
+                f"G0 X{p1['x']:.2f} Y{p1['y']:.2f} F{SAFE_XY_FEEDRATE}",
+                "M400",
+                f"G1 Z{base_z:.2f} F{SAFE_Z_FEEDRATE}",
+                "M400"
+            ])
         else:
             if abs(current_pos['x'] - p1['x']) > 0.005 or abs(current_pos['y'] - p1['y']) > 0.005:
                 gcode.append(f"G1 X{p1['x']:.2f} Y{p1['y']:.2f} F{speed}")
         gcode.append(f"G1 X{p2['x']:.2f} Y{p2['y']:.2f} F{speed}")
         current_pos = p2
 
-    gcode.extend(["M400", f"G1 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}", f"G1 Z90 F{SAFE_Z_FEEDRATE}",
-                  f"G0 X{mid:.1f} Y{mid:.1f} F{SAFE_XY_FEEDRATE}", "M400 S1"])
+    gcode.extend([
+        "M400",
+        f"G1 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}",
+        f"G1 Z50 F{SAFE_Z_FEEDRATE} ; Lift pen high",
+        f"G0 X{mid:.1f} Y{bed_max - 10:.1f} F{SAFE_XY_FEEDRATE} ; Move bed forward for removal",
+        "M400 S1",
+        "M73 P100 R0"
+    ])
     return "\n".join(gcode)
