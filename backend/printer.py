@@ -270,27 +270,34 @@ def execute_plot(paths, base_z, speed, z_hop, bed_size):
     def is_close(pA, pB):
         return abs(pA['x'] - pB['x']) < 0.03 and abs(pA['y'] - pB['y']) < 0.03
 
-    for segment in paths:
-        p1, p2 = segment[0], segment[1]
-        if not is_close(current_pos, p1):
-            dist = math.hypot(p1['x'] - current_pos['x'], p1['y'] - current_pos['y'])
+    for poly in paths:
+        if not poly or len(poly) < 2:
+            continue
+
+        p_start = poly[0]
+        if not is_close(current_pos, p_start):
+            dist = math.hypot(p_start['x'] - current_pos['x'], p_start['y'] - current_pos['y'])
             timed_commands.extend([
                 {"cmd": "M400", "time": 0.05},
                 {"cmd": f"G1 Z{hop_z:.2f} F{SAFE_Z_FEEDRATE}", "time": z_time_hop},
                 {"cmd": "M400", "time": 0.05},
-                {"cmd": f"G0 X{p1['x']:.2f} Y{p1['y']:.2f} F{SAFE_XY_FEEDRATE}", "time": (dist / (SAFE_XY_FEEDRATE / 60.0)) + 0.05},
+                {"cmd": f"G0 X{p_start['x']:.2f} Y{p_start['y']:.2f} F{SAFE_XY_FEEDRATE}", "time": (dist / (SAFE_XY_FEEDRATE / 60.0)) + 0.05},
                 {"cmd": "M400", "time": 0.05},
                 {"cmd": f"G1 Z{base_z:.2f} F{SAFE_Z_FEEDRATE}", "time": z_time_hop},
                 {"cmd": "M400", "time": 0.05}
             ])
         else:
-            if abs(current_pos['x'] - p1['x']) > 0.005 or abs(current_pos['y'] - p1['y']) > 0.005:
-                dist = math.hypot(p1['x'] - current_pos['x'], p1['y'] - current_pos['y'])
-                timed_commands.append({"cmd": f"G1 X{p1['x']:.2f} Y{p1['y']:.2f} F{speed}", "time": (dist / (speed / 60.0)) + 0.05})
+            if abs(current_pos['x'] - p_start['x']) > 0.005 or abs(current_pos['y'] - p_start['y']) > 0.005:
+                dist = math.hypot(p_start['x'] - current_pos['x'], p_start['y'] - current_pos['y'])
+                timed_commands.append({"cmd": f"G1 X{p_start['x']:.2f} Y{p_start['y']:.2f} F{speed}", "time": (dist / (speed / 60.0)) + 0.05})
 
-        dist = math.hypot(p2['x'] - p1['x'], p2['y'] - p1['y'])
-        timed_commands.append({"cmd": f"G1 X{p2['x']:.2f} Y{p2['y']:.2f} F{speed}", "time": (dist / (speed / 60.0)) + 0.05})
-        current_pos = p2
+        current_pos = p_start
+
+        # Draw remaining points in the polyline continuously
+        for pt in poly[1:]:
+            dist = math.hypot(pt['x'] - current_pos['x'], pt['y'] - current_pos['y'])
+            timed_commands.append({"cmd": f"G1 X{pt['x']:.2f} Y{pt['y']:.2f} F{speed}", "time": (dist / (speed / 60.0)) + 0.05})
+            current_pos = pt
 
     timed_commands.extend([
         {"cmd": "M400", "time": 0.1},

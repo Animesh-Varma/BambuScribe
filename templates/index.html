@@ -17,8 +17,52 @@
             }
         }
     </script>
+    <style>
+        /* Fast-Reveal Material 3 Floating Tooltip */
+        #m3-tooltip {
+            position: fixed;
+            z-index: 100000;
+            pointer-events: none;
+            background: var(--md-sys-color-inverse-surface, #313033);
+            color: var(--md-sys-color-inverse-on-surface, #f4eff4);
+            font-family: Roboto, system-ui, sans-serif;
+            font-size: 12px;
+            font-weight: 500;
+            line-height: 16px;
+            padding: 6px 12px;
+            border-radius: 8px;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+            max-width: 290px;
+            opacity: 0;
+            transform: scale(0.94) translateY(4px);
+            transition: opacity 0.1s cubic-bezier(0.2, 0, 0, 1), transform 0.1s cubic-bezier(0.2, 0, 0, 1);
+            white-space: normal;
+            word-break: normal;
+        }
+        #m3-tooltip.visible {
+            opacity: 1;
+            transform: scale(1) translateY(0);
+        }
+        .m3-tooltip-target {
+            cursor: help;
+        }
+        .m3-help-icon {
+            font-size: 15px;
+            vertical-align: middle;
+            opacity: 0.65;
+            margin-left: 4px;
+            cursor: help;
+        }
+        .m3-help-icon:hover {
+            opacity: 1;
+            color: var(--md-sys-color-primary);
+        }
+    </style>
 </head>
 <body>
+    <!-- Material 3 Dynamic Floating Tooltip Element -->
+    <div id="m3-tooltip" role="tooltip"></div>
+
     <div id="model-modal" role="dialog" aria-modal="true" aria-labelledby="model-modal-title" style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; display:flex; align-items:center; justify-content:center;">
         <div style="background:var(--surface-color); padding:32px; border-radius:24px; text-align:center; max-width:400px; box-shadow: 0 8px 24px rgba(0,0,0,0.2);">
             <h2 id="model-modal-title" style="margin-top:0;">Select Printer Model</h2>
@@ -47,18 +91,15 @@
             <h2 id="download-modal-title" style="margin-top:0; display:flex; align-items:center; gap:8px;"><md-icon style="color:var(--md-sys-color-primary);">info</md-icon> Standalone Plot Instructions</h2>
             <div style="margin-bottom:24px; color:var(--text-color); font-size:15px; line-height:1.5;">
                 <p>Because this file will be executed directly from the printer, it contains an automated safety sequence:</p>
-
                 <div style="margin: 14px 0; padding: 10px 14px; background: rgba(211, 47, 47, 0.1); border-left: 4px solid #d32f2f; border-radius: 6px; font-size: 14px;">
                     <strong>Crucial:</strong> <b>Auto Bed Leveling</b>, <b>Timelapse</b>, <b>Flow Calibration</b>, and any other pre-print add-ons or calibrations <b>MUST</b> be toggled OFF when starting this print to prevent toolhead collisions.
                 </div>
-
                 <ol style="margin-top: 10px; padding-left: 20px; display: flex; flex-direction: column; gap: 10px;">
                     <li>Transfer the downloaded <b>.gcode</b> file onto the printer's MicroSD card, make sure all calibrations/add-ons are unchecked, and start the job.</li>
                     <li><strong>Pause 1 (Safety Warning):</strong> The printer will immediately pause. Make sure your pen/attachment is <b>REMOVED</b> so it does not collide with the bed, then press <b>Resume</b>.</li>
                     <li><strong>Homing:</strong> The machine will safely home all axes and move the toolhead to the side.</li>
                     <li><strong>Pause 2 (Energized Setup):</strong> The printer will pause again with <b>motors locked</b>. Mount your paper and pen, set your contact height, and press <b>Resume</b> to plot!</li>
                 </ol>
-
                 <p style="margin-top: 14px; margin-bottom: 0; font-size: 13.5px; opacity: 0.85;">
                     <b>Note:</b> Long pauses after pressing <b>Resume</b> are completely normal while the firmware processes commands.
                 </p>
@@ -73,15 +114,12 @@
     <!-- Home Error Popup Modal -->
     <div id="home-error-modal" role="dialog" aria-modal="true" aria-labelledby="home-error-title" aria-describedby="home-error-desc" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.32); backdrop-filter: blur(2px); z-index: 10000; display: none; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box;">
         <div style="background: var(--md-sys-color-surface-container-high, var(--surface-color, #ece6f0)); padding: 28px 24px 24px 24px; border-radius: 28px; width: 100%; max-width: 340px; box-shadow: 0 6px 10px rgba(0, 0, 0, 0.14); box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch;">
-
             <h2 id="home-error-title" style="margin: 0 auto 12px auto; width: 100%; display: flex; justify-content: center; text-align: center !important; font-family: Roboto, system-ui, sans-serif; font-size: 22px; font-weight: 500; line-height: 28px; color: #e57373;">
                 Homing Required
             </h2>
-
             <p id="home-error-desc" style="margin: 0 0 24px 0; width: 100%; text-align: center !important; font-family: Roboto, system-ui, sans-serif; font-size: 14px; font-weight: 400; line-height: 20px; color: var(--md-sys-color-on-surface-variant, #49454f);">
                 Home the printer first before starting a direct plot.
             </p>
-
             <div style="display: flex; width: 100%;">
                 <md-filled-button style="width: 100%;" onclick="document.getElementById('home-error-modal').style.display='none'">
                     Got it
@@ -96,16 +134,20 @@
     </div>
 
     <div class="container">
-        <div class="card">
-            <h2><md-icon>deployed_code</md-icon> Visualizer</h2>
-            <div id="canvas-container"></div>
-            <div class="zoom-controls">
-                <md-icon>zoom_in</md-icon>
-                <md-slider id="vis-zoom" min="0.5" max="5.0" value="1.0" step="0.1" style="flex: 1;"></md-slider>
+        <!-- Visualizer Card Window (Stretches to column height; inner wrapper floats smoothly down) -->
+        <div class="card" id="card-visualizer" style="height: 100%; box-sizing: border-box; position: relative;">
+            <div id="visualizer-sticky-wrapper" style="position: sticky; top: 16px; display: flex; flex-direction: column; gap: 8px;">
+                <h2><md-icon>deployed_code</md-icon> Visualizer</h2>
+                <div id="canvas-container"></div>
+                <div class="zoom-controls">
+                    <md-icon title="Visualizer Zoom">zoom_in</md-icon>
+                    <md-slider id="vis-zoom" min="0.5" max="5.0" value="1.0" step="0.1" style="flex: 1;"></md-slider>
+                </div>
+                <p id="coord-display" style="font-weight: bold; text-align: center; margin-top: 6px; font-size: 18px;">X: 0.0 | Y: 0.0 | Z: 0.0</p>
             </div>
-            <p id="coord-display" style="font-weight: bold; text-align: center; margin-top: 10px; font-size: 18px;">X: 0.0 | Y: 0.0 | Z: 0.0</p>
         </div>
 
+        <!-- Controls Card -->
         <div class="card">
             <h2><md-icon>gamepad</md-icon> Controls</h2>
             <div id="warning-banner"></div>
@@ -162,18 +204,44 @@
             <div id="queue-display">Command Queue Empty</div>
         </div>
 
+        <!-- Plotting Engine Card -->
         <div class="card full-width">
-            <div style="display: flex; flex-direction: column; gap: 16px; margin-bottom: 24px; border-bottom: 1px solid var(--border-color); padding-bottom: 16px;">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <h2><md-icon>draw</md-icon> Plotting Engine</h2>
-                    <div style="display: flex; gap: 8px; align-items: center;">
-                        <md-outlined-text-field id="global-zhop" type="number" label="Pen Z-Hop (mm)" value="4" style="width:140px;"></md-outlined-text-field>
-                        <md-filled-button id="btn-tab-text" onclick="window.setTab('text')"><md-icon slot="icon">text_fields</md-icon> Write Text</md-filled-button>
-                        <md-outlined-button id="btn-tab-img" onclick="window.setTab('image')"><md-icon slot="icon">image</md-icon> Plot Image</md-outlined-button>
-                    </div>
+            <!-- Clean Header with Engine Title and View Tabs -->
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
+                <h2><md-icon>draw</md-icon> Plotting Engine</h2>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <md-filled-button id="btn-tab-text" onclick="window.setTab('text')"><md-icon slot="icon">text_fields</md-icon> Write Text</md-filled-button>
+                    <md-outlined-button id="btn-tab-img" onclick="window.setTab('image')"><md-icon slot="icon">image</md-icon> Plot Image</md-outlined-button>
                 </div>
             </div>
 
+            <!-- Material 3 Expressive Circular Loader for Algorithm Computations -->
+            <div id="engine-loader" style="display: none; align-items: center; justify-content: center; gap: 12px; padding: 10px 16px; margin-bottom: 16px; background: rgba(0, 104, 116, 0.08); border-radius: 12px; border: 1px solid var(--border-color);">
+                <md-circular-progress indeterminate style="--md-circular-progress-size: 28px;"></md-circular-progress>
+                <span style="font-size: 13.5px; font-weight: 500; color: var(--md-sys-color-primary, #006874);">Generating vector toolpaths...</span>
+            </div>
+
+            <!-- Native Toolhead Setup Configuration Card (Seamlessly hosts Pen Size & Z-Hop) -->
+            <div style="display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 14px; padding: 14px 20px; margin-bottom: 20px;">
+                <!-- Native Pen Size Slider -->
+                <div class="slider-item" style="margin: 0;">
+                    <div class="slider-label">
+                        <span>
+                            <strong class="m3-tooltip-target" data-tooltip="Physical tip width of your mounted pen (e.g. 0.02 mm ultra-fine capillary, 0.30 mm fineliner, 0.50 mm gel pen). Accurately simulates ink line thickness on the page and automatically tunes path optimization parameters to prevent paper bleed.">Line Width / Pen Size</strong>
+                            <md-icon class="m3-help-icon m3-tooltip-target" data-tooltip="Physical tip width of your mounted pen (e.g. 0.02 mm ultra-fine capillary, 0.30 mm fineliner, 0.50 mm gel pen). Accurately simulates ink line thickness on the page and automatically tunes path optimization parameters to prevent paper bleed.">help_outline</md-icon>
+                        </span>
+                        <span id="label-pen-width" style="font-weight: 700; font-family: monospace; font-size: 14px;">0.30 mm</span>
+                    </div>
+                    <md-slider id="vis-pen-width" min="0.02" max="1.50" value="0.30" step="0.02"></md-slider>
+                </div>
+
+                <!-- Z-Hop Text Field -->
+                <div style="display: flex; align-items: center;">
+                    <md-outlined-text-field id="global-zhop" type="number" label="Pen Z-Hop" value="4" suffix-text="mm" style="width: 140px;" class="m3-tooltip-target" data-tooltip="Height the pen lifts above the paper during rapid travel moves between strokes to prevent accidental pen dragging."></md-outlined-text-field>
+                </div>
+            </div>
+
+            <!-- Text View -->
             <div id="view-text">
                 <p style="font-size: 13px; color: #666; margin: 0 0 16px 0;">
                     <md-icon style="font-size:16px; vertical-align:middle;">info</md-icon>
@@ -208,6 +276,7 @@
                 <textarea class="editor-input" id="doc-text" placeholder="Type text here..."></textarea>
             </div>
 
+            <!-- Image View -->
             <div id="view-image" style="display: none; grid-template-columns: 1fr 1fr; gap: 24px;">
                 <div style="display: flex; flex-direction: column; gap: 16px;">
                     <div style="display: flex; gap: 16px;">
@@ -221,35 +290,136 @@
                             <md-outlined-button onclick="clearImage()" style="width: 100%;"><md-icon slot="icon">delete</md-icon> Clear Image</md-outlined-button>
                         </div>
                     </div>
+
+                    <!-- Clean Algorithm Options with M3 Tooltip Metadata -->
                     <md-outlined-select id="img-method" label="Plotting Method" style="width: 100%;">
-                        <md-select-option value="hatch" selected><div slot="headline">Crosshatching (Classic)</div></md-select-option>
-                        <md-select-option value="tsp"><div slot="headline">Stippling (TSP)</div></md-select-option>
-                        <md-select-option value="canny"><div slot="headline">Vector Tracing (Canny)</div></md-select-option>
+                        <md-select-option value="hatch" selected data-tooltip="Classic multi-directional crosshatching. Maps grayscale tone darkness to shading line density.">
+                            <div slot="headline" data-tooltip="Classic multi-directional crosshatching. Maps grayscale tone darkness to shading line density.">Crosshatching</div>
+                        </md-select-option>
+                        <md-select-option value="skeleton" data-tooltip="Morphological thinning to 1-pixel spines. Eliminates double-outlining on signatures, line art, and handwriting.">
+                            <div slot="headline" data-tooltip="Morphological thinning to 1-pixel spines. Eliminates double-outlining on signatures, line art, and handwriting.">Centerline / Skeleton</div>
+                        </md-select-option>
+                        <md-select-option value="spiral" data-tooltip="Continuous Archimedean spiral with tone-modulated sine waves. Plots portraits with zero pen lifts.">
+                            <div slot="headline" data-tooltip="Continuous Archimedean spiral with tone-modulated sine waves. Plots portraits with zero pen lifts.">Archimedean Spiral</div>
+                        </md-select-option>
+                        <md-select-option value="squiggle" data-tooltip="Continuous boustrophedon serpentine raster scanlines with tone-modulated wave amplitude.">
+                            <div slot="headline" data-tooltip="Continuous boustrophedon serpentine raster scanlines with tone-modulated wave amplitude.">Serpentine Squiggle</div>
+                        </md-select-option>
+                        <md-select-option value="flow_field" data-tooltip="Structure Tensor Edge Tangent Flow streamlines. Generates classic copperplate and woodcut engraving aesthetics.">
+                            <div slot="headline" data-tooltip="Structure Tensor Edge Tangent Flow streamlines. Generates classic copperplate and woodcut engraving aesthetics.">Flow Field Engraving</div>
+                        </md-select-option>
+                        <md-select-option value="stipple" data-tooltip="Blue-noise tone-weighted dot sampling relaxed via spatial repulsion. Draws distinct micro-dots.">
+                            <div slot="headline" data-tooltip="Blue-noise tone-weighted dot sampling relaxed via spatial repulsion. Draws distinct micro-dots.">Blue-Noise Stipple</div>
+                        </md-select-option>
+                        <md-select-option value="contours" data-tooltip="Multi-level iso-luminance topographic contour elevation slices across tone depths.">
+                            <div slot="headline" data-tooltip="Multi-level iso-luminance topographic contour elevation slices across tone depths.">Topographic Contours</div>
+                        </md-select-option>
+                        <md-select-option value="canny" data-tooltip="Canny hysteresis gradient filter for tracing high-contrast vector outlines.">
+                            <div slot="headline" data-tooltip="Canny hysteresis gradient filter for tracing high-contrast vector outlines.">Vector Edge Tracing</div>
+                        </md-select-option>
+                        <md-select-option value="tsp" data-tooltip="Travelling Salesperson Tour connecting blue-noise stipple nodes into a continuous single-line path.">
+                            <div slot="headline" data-tooltip="Travelling Salesperson Tour connecting blue-noise stipple nodes into a continuous single-line path.">TSP Tour</div>
+                        </md-select-option>
                     </md-outlined-select>
+
+                    <!-- Dynamic Method Explanation Badge -->
+                    <div id="method-description" style="font-size: 12.5px; opacity: 0.85; line-height: 1.4; padding: 6px 12px; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px; display: flex; align-items: center; gap: 8px;">
+                        <md-icon style="font-size: 16px; color: var(--md-sys-color-primary);">info</md-icon>
+                        <span id="method-description-text">Classic multi-directional crosshatching. Maps grayscale tone darkness to shading line density.</span>
+                    </div>
+
+                    <!-- Exposed Path Optimizer Settings with Informational Tooltips -->
+                    <div id="opt-panel" style="border: 1px solid var(--border-color); border-radius: 14px; padding: 16px; background: var(--bg-color); display: flex; flex-direction: column; gap: 14px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <div style="font-weight: 500; font-size: 14px; display: flex; align-items: center; gap: 8px;">
+                                <md-icon style="font-size: 18px; color: var(--md-sys-color-primary);">tune</md-icon>
+                                <span>Path Optimizer (0.02 mm Precision)</span>
+                            </div>
+                            <span class="m3-help-icon m3-tooltip-target" data-tooltip="Sub-line-width vector optimizations. Sane defaults prevent corner-cutting on text and protect microscopic 0.02 mm stipple details.">
+                                <md-icon style="font-size: 16px;">info</md-icon>
+                            </span>
+                        </div>
+
+                        <!-- Noise Filter Slider -->
+                        <div class="slider-item">
+                            <div class="slider-label">
+                                <span>
+                                    <span class="m3-tooltip-target" data-tooltip="Discards tiny micro-noise strokes shorter than this length. Kept at 0.02 mm so fine dots, punctuation, and delicate stipples are never deleted.">Min Stroke Length (Noise Filter)</span>
+                                </span>
+                                <span id="label-min-stroke" style="font-family: monospace;">0.02 mm</span>
+                            </div>
+                            <md-slider id="opt-min-stroke" min="0.0" max="0.5" value="0.02" step="0.01"></md-slider>
+                        </div>
+
+                        <!-- Gap Stitching Slider -->
+                        <div class="slider-item">
+                            <div class="slider-label">
+                                <span>
+                                    <span class="m3-tooltip-target" data-tooltip="Bridges small gaps between consecutive strokes with a drawing move instead of a Z-hop. Kept at 0.00 mm (Safe) to prevent visible dragging marks across white paper.">Gap Stitching (Air Gaps)</span>
+                                </span>
+                                <span id="label-stitch-gap" style="font-family: monospace;">0.00 mm (Safe)</span>
+                            </div>
+                            <md-slider id="opt-stitch-gap" min="0.0" max="1.5" value="0.0" step="0.05"></md-slider>
+                        </div>
+
+                        <!-- Path Simplification Slider -->
+                        <div class="slider-item">
+                            <div class="slider-label">
+                                <span>
+                                    <span class="m3-tooltip-target" data-tooltip="Ramer-Douglas-Peucker simplification tolerance. Strips redundant collinear vertices from raster lines without rounding corners. Kept sub-line-width (<= 0.015 mm) so it remains invisible under the pen nib.">Path Simplification (RDP &epsilon;)</span>
+                                </span>
+                                <span id="label-rdp-eps" style="font-family: monospace;">0.008 mm</span>
+                            </div>
+                            <md-slider id="opt-rdp-eps" min="0.002" max="0.04" value="0.008" step="0.002"></md-slider>
+                        </div>
+                    </div>
                 </div>
 
+                <!-- Context-Sensitive Algorithm Sliders -->
                 <div class="slider-group">
-                    <label style="display: flex; align-items: center; gap: 8px;">
+                    <label id="item-img-draw-bbox" style="display: flex; align-items: center; gap: 8px;">
                         <md-checkbox id="img-draw-bbox"></md-checkbox>
                         <span style="font-weight: 500; font-size: 14px;">Draw Bounding Box</span>
                     </label>
-                    <div class="slider-item">
-                        <div class="slider-label"><span>Density / Line Gap</span><span id="label-gap">1.0 mm</span></div>
+
+                    <!-- Dynamically labeled & hidden for algos that do not use gap -->
+                    <div class="slider-item" id="item-img-gap">
+                        <div class="slider-label">
+                            <span id="title-img-gap" class="m3-tooltip-target" data-tooltip="Spacing between adjacent hatch lines or continuous spiral/wave tracks.">Line Gap / Spacing</span>
+                            <span id="label-gap" style="font-family: monospace;">1.0 mm</span>
+                        </div>
                         <md-slider id="img-gap" min="0.2" max="3.0" value="1.0" step="0.1"></md-slider>
                     </div>
-                    <div class="slider-item">
-                        <div class="slider-label"><span>Contrast / Threshold</span><span id="label-contrast">1.5 x</span></div>
+
+                    <!-- Contrast / Threshold Slider -->
+                    <div class="slider-item" id="item-img-contrast">
+                        <div class="slider-label">
+                            <span id="title-img-contrast" class="m3-tooltip-target" data-tooltip="Image contrast enhancement curve applied prior to vector generation.">Contrast / Threshold</span>
+                            <span id="label-contrast" style="font-family: monospace;">1.5 x</span>
+                        </div>
                         <md-slider id="img-contrast" min="0.5" max="4.0" value="1.5" step="0.1"></md-slider>
                     </div>
-                    <div class="slider-item">
-                        <div class="slider-label"><span>Scale / Resize</span><span id="label-scale">100 %</span></div>
+
+                    <!-- Contour Slices: Visible only in Topographic Contours mode -->
+                    <div class="slider-item" id="item-img-levels" style="display: none;">
+                        <div class="slider-label">
+                            <span class="m3-tooltip-target" data-tooltip="Number of distinct iso-luminance / topographic elevation levels extracted across tone depths.">Contour Slices (Levels)</span>
+                            <span id="label-contour-levels" style="font-family: monospace;">6</span>
+                        </div>
+                        <md-slider id="opt-contour-levels" min="2" max="16" value="6" step="1"></md-slider>
+                    </div>
+
+                    <div class="slider-item" id="item-img-scale">
+                        <div class="slider-label"><span>Scale / Resize</span><span id="label-scale" style="font-family: monospace;">100 %</span></div>
                         <md-slider id="img-scale" min="10" max="300" value="100" step="1"></md-slider>
                     </div>
-                    <div class="slider-item">
-                        <div class="slider-label"><span>Rotation</span><span id="label-rotate">0 &deg;</span></div>
+
+                    <div class="slider-item" id="item-img-rotate">
+                        <div class="slider-label"><span>Rotation</span><span id="label-rotate" style="font-family: monospace;">0 &deg;</span></div>
                         <md-slider id="img-rotate" min="-180" max="180" value="0" step="1"></md-slider>
                     </div>
-                    <div style="display: flex; gap: 16px;">
+
+                    <div style="display: flex; gap: 16px;" id="item-img-offsets">
                         <md-outlined-text-field id="img-offset-x" type="number" label="Offset X (mm)" value="0" style="flex:1;"></md-outlined-text-field>
                         <md-outlined-text-field id="img-offset-y" type="number" label="Offset Y (mm)" value="0" style="flex:1;"></md-outlined-text-field>
                     </div>

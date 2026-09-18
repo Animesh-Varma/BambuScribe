@@ -7,6 +7,7 @@ let previewTimeout = null;
 let isHomed = false;
 let isPreviewing = false;
 let pendingPreview = false;
+let cachedPreviewData = null;
 
 let currentPos = {x: 0, y: 0, z: 0};
 let bboxPoints = JSON.parse(localStorage.getItem('plotter_bbox_points')) || [];
@@ -14,8 +15,71 @@ let manualQueue = [];
 let predictedPos = {x: 0, y: 0, z: 0};
 let isProcessingQueue = false;
 
-const visualizer = new PlotterVisualizer('canvas-container');
+let currentPenWidth = parseFloat(localStorage.getItem('plotter_pen_width') || '0.30');
 
+const visualizer = new PlotterVisualizer('canvas-container');
+visualizer.setPenWidth(currentPenWidth);
+
+// =============================================================================
+// MATERIAL 3 TOOLTIP ENGINE
+// =============================================================================
+function initM3Tooltips() {
+    const tooltipEl = document.getElementById('m3-tooltip');
+    if (!tooltipEl) return;
+    let hoverTimer = null;
+
+    document.addEventListener('mouseover', (e) => {
+        const path = e.composedPath ? e.composedPath() : [e.target];
+        let target = null;
+        let text = null;
+
+        for (const el of path) {
+            if (el && el.getAttribute) {
+                text = el.getAttribute('data-tooltip') || el.getAttribute('title');
+                if (text) {
+                    target = el;
+                    if (el.hasAttribute('title')) {
+                        el.setAttribute('data-tooltip', text);
+                        el.removeAttribute('title');
+                    }
+                    break;
+                }
+            }
+        }
+
+        if (!target || !text) return;
+
+        clearTimeout(hoverTimer);
+        hoverTimer = setTimeout(() => {
+            tooltipEl.textContent = text;
+            tooltipEl.classList.add('visible');
+
+            const rect = target.getBoundingClientRect();
+            const tipRect = tooltipEl.getBoundingClientRect();
+
+            let left = rect.left + (rect.width / 2) - (tipRect.width / 2);
+            left = Math.max(12, Math.min(window.innerWidth - tipRect.width - 12, left));
+
+            let top = rect.top - tipRect.height - 8;
+            if (top < 12) {
+                top = rect.bottom + 8;
+            }
+
+            tooltipEl.style.left = `${left}px`;
+            tooltipEl.style.top = `${top}px`;
+        }, 80);
+    }, true);
+
+    document.addEventListener('mouseout', () => {
+        clearTimeout(hoverTimer);
+        tooltipEl.classList.remove('visible');
+    }, true);
+}
+initM3Tooltips();
+
+// =============================================================================
+// PRINTER MODEL SELECTION & THEME
+// =============================================================================
 window.selectModel = function(size) {
     BED_SIZE = size;
     document.getElementById('model-modal').style.display = 'none';
@@ -40,9 +104,35 @@ updateTheme();
 themeToggle.addEventListener('click', () => {
     document.body.classList.toggle('dark-mode');
     updateTheme();
-    if (bboxPoints.length === 4) triggerPreview();
+    if (cachedPreviewData) {
+        renderCanvas2D(cachedPreviewData);
+        visualizer.drawPreview(cachedPreviewData.paths, cachedPreviewData.out_paths, cachedPreviewData.origin_z, BED_SIZE, document.body.classList.contains('dark-mode'));
+    } else if (bboxPoints.length === 4) {
+        triggerPreview();
+    }
 });
 
+// =============================================================================
+// NATIVE TOOLHEAD PEN SIZE / LINE WIDTH SLIDER
+// =============================================================================
+const penWidthSlider = document.getElementById('vis-pen-width');
+const penWidthLabel = document.getElementById('label-pen-width');
+if (penWidthSlider) {
+    penWidthSlider.value = currentPenWidth;
+    if (penWidthLabel) penWidthLabel.innerText = currentPenWidth.toFixed(2) + ' mm';
+    penWidthSlider.addEventListener('input', (e) => {
+        currentPenWidth = parseFloat(e.target.value);
+        if (penWidthLabel) penWidthLabel.innerText = currentPenWidth.toFixed(2) + ' mm';
+        localStorage.setItem('plotter_pen_width', currentPenWidth.toString());
+        visualizer.setPenWidth(currentPenWidth);
+        if (cachedPreviewData && currentMode === 'image') {
+            renderCanvas2D(cachedPreviewData);
+        }
+        autoPreview();
+    });
+}
+
+// Mode Switching (Text / Image)
 window.setTab = function(mode) {
     currentMode = mode;
     document.getElementById('view-text').style.display = mode === 'text' ? 'block' : 'none';
@@ -64,7 +154,7 @@ window.setTab = function(mode) {
     }
 };
 
-// UI Persistence configuration mapping via LocalStorage
+// UI Persistence via LocalStorage
 const imgSettings = JSON.parse(localStorage.getItem('plotter_img_settings')) || {};
 if (imgSettings.gap) { document.getElementById('img-gap').value = imgSettings.gap; document.getElementById('label-gap').innerText = parseFloat(imgSettings.gap).toFixed(1) + ' mm'; }
 if (imgSettings.contrast) { document.getElementById('img-contrast').value = imgSettings.contrast; document.getElementById('label-contrast').innerText = parseFloat(imgSettings.contrast).toFixed(1) + ' x'; }
@@ -75,6 +165,25 @@ if (imgSettings.offsetY !== undefined) document.getElementById('img-offset-y').v
 if (imgSettings.method) document.getElementById('img-method').value = imgSettings.method;
 if (imgSettings.speed) document.getElementById('img-speed').value = imgSettings.speed;
 if (imgSettings.drawBBox !== undefined) document.getElementById('img-draw-bbox').checked = imgSettings.drawBBox;
+
+const optSettings = JSON.parse(localStorage.getItem('plotter_opt_settings')) || {};
+if (optSettings.minStroke !== undefined && document.getElementById('opt-min-stroke')) {
+    document.getElementById('opt-min-stroke').value = optSettings.minStroke;
+    document.getElementById('label-min-stroke').innerText = parseFloat(optSettings.minStroke).toFixed(2) + ' mm';
+}
+if (optSettings.stitchGap !== undefined && document.getElementById('opt-stitch-gap')) {
+    document.getElementById('opt-stitch-gap').value = optSettings.stitchGap;
+    const v = parseFloat(optSettings.stitchGap);
+    document.getElementById('label-stitch-gap').innerText = v === 0 ? '0.00 mm (Safe)' : v.toFixed(2) + ' mm';
+}
+if (optSettings.rdpEps !== undefined && document.getElementById('opt-rdp-eps')) {
+    document.getElementById('opt-rdp-eps').value = optSettings.rdpEps;
+    document.getElementById('label-rdp-eps').innerText = parseFloat(optSettings.rdpEps).toFixed(3) + ' mm';
+}
+if (optSettings.levels !== undefined && document.getElementById('opt-contour-levels')) {
+    document.getElementById('opt-contour-levels').value = optSettings.levels;
+    document.getElementById('label-contour-levels').innerText = optSettings.levels;
+}
 
 const txtSettings = JSON.parse(localStorage.getItem('plotter_text_settings')) || {};
 if (txtSettings.font) document.getElementById('doc-font').value = txtSettings.font;
@@ -95,6 +204,15 @@ function saveImgSettings() {
     }));
 }
 
+function saveOptSettings() {
+    localStorage.setItem('plotter_opt_settings', JSON.stringify({
+        minStroke: document.getElementById('opt-min-stroke')?.value,
+        stitchGap: document.getElementById('opt-stitch-gap')?.value,
+        rdpEps: document.getElementById('opt-rdp-eps')?.value,
+        levels: document.getElementById('opt-contour-levels')?.value
+    }));
+}
+
 function saveTxtSettings() {
     localStorage.setItem('plotter_text_settings', JSON.stringify({
         font: document.getElementById('doc-font').value, spacing: document.getElementById('doc-spacing').value,
@@ -103,6 +221,123 @@ function saveTxtSettings() {
         zhop: document.getElementById('global-zhop').value
     }));
 }
+
+// =============================================================================
+// CONTEXT-SENSITIVE ALGORITHM PARAMETER DISPLAY
+// =============================================================================
+function updateMethodOptionsUI() {
+    const methodSelect = document.getElementById('img-method');
+    if (!methodSelect) return;
+    const method = methodSelect.value;
+
+    const itemGap = document.getElementById('item-img-gap');
+    const titleGap = document.getElementById('title-img-gap');
+    const itemContrast = document.getElementById('item-img-contrast');
+    const titleContrast = document.getElementById('title-img-contrast');
+    const itemLevels = document.getElementById('item-img-levels');
+    const descText = document.getElementById('method-description-text');
+
+    // Default states
+    if (itemGap) itemGap.style.display = 'flex';
+    if (itemContrast) itemContrast.style.display = 'flex';
+    if (itemLevels) itemLevels.style.display = 'none';
+
+    switch (method) {
+        case 'hatch':
+            if (descText) descText.innerText = "Classic multi-directional crosshatching. Maps grayscale tone darkness to shading line density.";
+            if (titleGap) {
+                titleGap.innerText = 'Hatch Line Gap';
+                titleGap.setAttribute('data-tooltip', 'Spacing between parallel hatch lines. Smaller gap creates denser, darker shading passes.');
+            }
+            if (titleContrast) {
+                titleContrast.innerText = 'Contrast / Tone Threshold';
+                titleContrast.setAttribute('data-tooltip', 'Adjusts tone separation curve across multi-angle hatching passes.');
+            }
+            break;
+        case 'skeleton':
+            if (descText) descText.innerText = "Morphological thinning to 1-pixel spines. Eliminates double-outlining on signatures, line art, and handwriting.";
+        case 'skeleton':
+            if (itemGap) itemGap.style.display = 'none';
+            if (titleContrast) {
+                titleContrast.innerText = 'Binarization Threshold';
+                titleContrast.setAttribute('data-tooltip', 'Otsu threshold cutoff distinguishing pen ink strokes from background paper.');
+            }
+            break;
+        case 'spiral':
+            if (descText) descText.innerText = "Continuous Archimedean spiral with tone-modulated sine waves. Plots portraits with zero pen lifts.";
+            if (titleGap) {
+                titleGap.innerText = 'Spiral Pitch / Revolution Spacing';
+                titleGap.setAttribute('data-tooltip', 'Radial distance between consecutive spiral revolutions from center to edge.');
+            }
+            if (titleContrast) {
+                titleContrast.innerText = 'Tone Modulation Sensitivity';
+                titleContrast.setAttribute('data-tooltip', 'Controls how aggressively dark pixels bend the spiral line into sine waves.');
+            }
+            break;
+        case 'squiggle':
+            if (descText) descText.innerText = "Continuous boustrophedon serpentine raster scanlines with tone-modulated wave amplitude.";
+            if (titleGap) {
+                titleGap.innerText = 'Wave Gap / Row Height';
+                titleGap.setAttribute('data-tooltip', 'Vertical spacing between back-and-forth serpentine raster scanlines.');
+            }
+            if (titleContrast) {
+                titleContrast.innerText = 'Wave Amplitude Contrast';
+                titleContrast.setAttribute('data-tooltip', 'Scales sine-wave oscillation amplitude across darker image areas.');
+            }
+            break;
+        case 'flow_field':
+            if (descText) descText.innerText = "Structure Tensor Edge Tangent Flow streamlines. Generates classic copperplate and woodcut engraving aesthetics.";
+            if (titleGap) {
+                titleGap.innerText = 'Streamline Separation Distance';
+                titleGap.setAttribute('data-tooltip', 'Minimum clearance between streamlines to prevent ink collisions.');
+            }
+            if (titleContrast) {
+                titleContrast.innerText = 'Gradient Sensitivity';
+                titleContrast.setAttribute('data-tooltip', 'Enhances edge tangent gradients for calculating streamline trajectories.');
+            }
+            break;
+        case 'stipple':
+            if (descText) descText.innerText = "Blue-noise tone-weighted dot sampling relaxed via spatial repulsion. Draws distinct micro-dots.";
+            if (titleGap) {
+                titleGap.innerText = 'Stipple Point Density';
+                titleGap.setAttribute('data-tooltip', 'Dot spacing factor. Lower values produce denser stipple shading.');
+            }
+            if (titleContrast) {
+                titleContrast.innerText = 'Tone Weighting Contrast';
+                titleContrast.setAttribute('data-tooltip', 'Non-linear tone curve for sampling dot frequency in shadows vs highlights.');
+            }
+            break;
+        case 'tsp':
+            if (descText) descText.innerText = "Travelling Salesperson Tour connecting blue-noise stipple nodes into a continuous single-line path.";
+            if (titleGap) {
+                titleGap.innerText = 'Tour Dot Density';
+                titleGap.setAttribute('data-tooltip', 'Density of coordinate nodes visited by the continuous single-line TSP path.');
+            }
+            if (titleContrast) {
+                titleContrast.innerText = 'Tone Weighting Contrast';
+                titleContrast.setAttribute('data-tooltip', 'Non-linear tone curve for sampling tour nodes in shadows vs highlights.');
+            }
+            break;
+        case 'contours':
+            if (descText) descText.innerText = "Multi-level iso-luminance topographic contour elevation slices across tone depths.";
+            if (itemGap) itemGap.style.display = 'none';
+            if (titleContrast) {
+                titleContrast.innerText = 'Image Pre-Filter Contrast';
+                titleContrast.setAttribute('data-tooltip', 'Adjusts tone contrast before contour extraction.');
+            }
+            if (itemLevels) itemLevels.style.display = 'flex';
+            break;
+        case 'canny':
+            if (descText) descText.innerText = "Canny hysteresis gradient filter for tracing high-contrast vector outlines.";
+            if (itemGap) itemGap.style.display = 'none';
+            if (titleContrast) {
+                titleContrast.innerText = 'Edge Detection Sensitivity';
+                titleContrast.setAttribute('data-tooltip', 'Adjusts Canny hysteresis threshold sensitivity.');
+            }
+            break;
+    }
+}
+updateMethodOptionsUI();
 
 function autoPreview() {
     if (currentMode === 'image' && !base64Image) return;
@@ -136,13 +371,14 @@ document.getElementById('img-input').addEventListener('change', (e) => {
 
 window.clearImage = function() {
     base64Image = null;
+    cachedPreviewData = null;
     document.getElementById('preview-wrapper').style.display = 'none';
     document.getElementById('upload-box').style.display = 'flex';
     document.getElementById('img-input').value = '';
     visualizer.clearPaths();
     document.getElementById('btn-plot').disabled = true;
     document.getElementById('btn-download').disabled = true;
-}
+};
 
 document.getElementById('img-gap').addEventListener('input', (e) => { document.getElementById('label-gap').innerText = parseFloat(e.target.value).toFixed(1) + ' mm'; saveImgSettings(); autoPreview(); });
 document.getElementById('img-contrast').addEventListener('input', (e) => { document.getElementById('label-contrast').innerText = parseFloat(e.target.value).toFixed(1) + ' x'; saveImgSettings(); autoPreview(); });
@@ -150,9 +386,23 @@ document.getElementById('img-scale').addEventListener('input', (e) => { document
 document.getElementById('img-rotate').addEventListener('input', (e) => { document.getElementById('label-rotate').innerHTML = parseInt(e.target.value) + ' &deg;'; saveImgSettings(); autoPreview(); });
 document.getElementById('img-offset-x').addEventListener('input', () => { saveImgSettings(); autoPreview(); });
 document.getElementById('img-offset-y').addEventListener('input', () => { saveImgSettings(); autoPreview(); });
-document.getElementById('img-method').addEventListener('change', () => { saveImgSettings(); autoPreview(); });
+document.getElementById('img-method').addEventListener('change', () => { updateMethodOptionsUI(); saveImgSettings(); autoPreview(); });
 document.getElementById('img-speed').addEventListener('change', () => saveImgSettings());
 document.getElementById('img-draw-bbox').addEventListener('change', () => { saveImgSettings(); autoPreview(); });
+
+// Optimizer listeners
+const optMinStroke = document.getElementById('opt-min-stroke');
+if (optMinStroke) optMinStroke.addEventListener('input', (e) => { document.getElementById('label-min-stroke').innerText = parseFloat(e.target.value).toFixed(2) + ' mm'; saveOptSettings(); autoPreview(); });
+const optStitchGap = document.getElementById('opt-stitch-gap');
+if (optStitchGap) optStitchGap.addEventListener('input', (e) => {
+    const v = parseFloat(e.target.value);
+    document.getElementById('label-stitch-gap').innerText = v === 0 ? '0.00 mm (Safe)' : v.toFixed(2) + ' mm';
+    saveOptSettings(); autoPreview();
+});
+const optRdpEps = document.getElementById('opt-rdp-eps');
+if (optRdpEps) optRdpEps.addEventListener('input', (e) => { document.getElementById('label-rdp-eps').innerText = parseFloat(e.target.value).toFixed(3) + ' mm'; saveOptSettings(); autoPreview(); });
+const optContourLevels = document.getElementById('opt-contour-levels');
+if (optContourLevels) optContourLevels.addEventListener('input', (e) => { document.getElementById('label-contour-levels').innerText = e.target.value; saveOptSettings(); autoPreview(); });
 
 document.getElementById('vis-zoom').addEventListener('input', (e) => visualizer.setZoom(parseFloat(e.target.value)));
 
@@ -161,6 +411,9 @@ function showWarning(msg) { warningBanner.innerText = msg; warningBanner.style.d
 
 document.querySelectorAll('.quick-step').forEach(btn => btn.addEventListener('click', (e) => document.getElementById('step-input').value = e.target.dataset.val));
 
+// =============================================================================
+// PRINTER JOGGING & CALIBRATION QUEUE
+// =============================================================================
 document.getElementById('btn-home').addEventListener('click', async () => {
     try {
         const res = await fetch('/api/home', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bed_size: BED_SIZE }) });
@@ -257,6 +510,7 @@ document.getElementById('btn-origin').addEventListener('click', () => {
         }
     } else {
         bboxPoints = [];
+        cachedPreviewData = null;
         localStorage.removeItem('plotter_bbox_points');
         document.getElementById('btn-origin').innerHTML = `<md-icon slot="icon">crop_free</md-icon> Set BBox (0/4)`;
         visualizer.updateBBoxDots(bboxPoints, BED_SIZE);
@@ -337,6 +591,9 @@ function updateBBoxPoint(i) {
     if (bboxPoints.length === 4) autoPreview();
 }
 
+// =============================================================================
+// PATH GENERATION PAYLOAD BUILDER
+// =============================================================================
 function getPayload() {
     if (bboxPoints.length !== 4) return null;
     let bbox = {
@@ -347,12 +604,18 @@ function getPayload() {
     const draw_bbox = currentMode === 'text' ? document.getElementById('doc-draw-bbox').checked : document.getElementById('img-draw-bbox').checked;
     const z_hop = document.getElementById('global-zhop').value;
 
+    const minStroke = parseFloat(document.getElementById('opt-min-stroke')?.value || '0.02');
+    const stitchGap = parseFloat(document.getElementById('opt-stitch-gap')?.value || '0.0');
+    const rdpEps = parseFloat(document.getElementById('opt-rdp-eps')?.value || '0.008');
+    const levels = parseInt(document.getElementById('opt-contour-levels')?.value || '6');
+
     if (currentMode === 'text') {
         return {
             type: 'text', text: document.getElementById('doc-text').value, bbox: bbox, draw_bbox: draw_bbox,
             auto_wrap: document.getElementById('doc-auto-wrap').checked, font: document.getElementById('doc-font').value,
             line_spacing: document.getElementById('doc-spacing').value, font_size: document.getElementById('doc-size').value,
-            speed: document.getElementById('doc-speed').value, z_hop: z_hop, bed_size: BED_SIZE
+            speed: document.getElementById('doc-speed').value, z_hop: z_hop, bed_size: BED_SIZE,
+            pen_width: currentPenWidth, min_stroke_length: minStroke, stitch_gap: stitchGap, rdp_epsilon: rdpEps
         };
     } else {
         if (!base64Image) return null;
@@ -361,80 +624,114 @@ function getPayload() {
             img_gap: document.getElementById('img-gap').value, img_contrast: document.getElementById('img-contrast').value,
             img_scale: document.getElementById('img-scale').value, img_rotate: document.getElementById('img-rotate').value,
             img_offset_x: document.getElementById('img-offset-x').value, img_offset_y: document.getElementById('img-offset-y').value,
-            speed: document.getElementById('img-speed').value, z_hop: z_hop, bed_size: BED_SIZE
+            speed: document.getElementById('img-speed').value, z_hop: z_hop, bed_size: BED_SIZE,
+            pen_width: currentPenWidth, min_stroke_length: minStroke, stitch_gap: stitchGap, rdp_epsilon: rdpEps, levels: levels
         };
     }
 }
 
+// =============================================================================
+// 2D CANVAS
+// =============================================================================
+function renderCanvas2D(data) {
+    const canvas = document.getElementById('preview-2d');
+    if (!canvas || !canvas.parentElement) return;
+    canvas.width = canvas.parentElement.clientWidth;
+    canvas.height = canvas.width;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    const allPaths = (data.paths || []).concat(data.out_paths || []);
+    allPaths.forEach(poly => {
+        if (!poly) return;
+        poly.forEach(pt => {
+            if (pt.x < minX) minX = pt.x;
+            if (pt.x > maxX) maxX = pt.x;
+            if (pt.y < minY) minY = pt.y;
+            if (pt.y > maxY) maxY = pt.y;
+        });
+    });
+
+    const w = maxX - minX, h = maxY - minY;
+    if (w > 0 && h > 0) {
+        const scale = Math.min(canvas.width / w, canvas.height / h) * 0.9;
+        ctx.save();
+        ctx.translate(canvas.width / 2 - (w / 2) * scale, canvas.height / 2 - (h / 2) * scale);
+
+        // Physical pen-width simulation on canvas: W_px = W_mm * scale
+        const strokePx = Math.max(0.4, currentPenWidth * scale);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        const drawLines = (pathList, colorStyle) => {
+            if (!pathList) return;
+            ctx.beginPath();
+            pathList.forEach(poly => {
+                if (!poly || poly.length < 2) return;
+                ctx.moveTo((poly[0].x - minX) * scale, (maxY - poly[0].y) * scale);
+                for (let k = 1; k < poly.length; k++) {
+                    ctx.lineTo((poly[k].x - minX) * scale, (maxY - poly[k].y) * scale);
+                }
+            });
+            ctx.strokeStyle = colorStyle;
+            ctx.lineWidth = strokePx;
+            ctx.stroke();
+        };
+
+        const isDarkMode = document.body.classList.contains('dark-mode');
+        drawLines(data.paths, isDarkMode ? '#4fd8eb' : '#006874');
+        drawLines(data.out_paths, '#ff0000');
+        ctx.restore();
+    }
+}
+
+// =============================================================================
+// PREVIEW EXECUTION & LOADER ACTIVATION
+// =============================================================================
 async function triggerPreview() {
     if (isPreviewing) { pendingPreview = true; return; }
     const payload = getPayload();
-    if(!payload) { if (bboxPoints.length !== 4) showWarning("Set 4-point Bounding Box first!"); return; }
+    if (!payload) {
+        if (bboxPoints.length !== 4) showWarning("Set 4-point Bounding Box first!");
+        return;
+    }
 
     isPreviewing = true;
+    const loader = document.getElementById('engine-loader');
+    if (loader) loader.style.display = 'flex';
 
     try {
         const res = await fetch('/api/preview', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
         const data = await res.json();
         if (data.status === 'success') {
+            cachedPreviewData = data;
             const isDarkMode = document.body.classList.contains('dark-mode');
             visualizer.drawPreview(data.paths, data.out_paths, data.origin_z, BED_SIZE, isDarkMode);
 
             if (currentMode === 'image') {
-                const canvas = document.getElementById('preview-2d');
-                canvas.width = canvas.parentElement.clientWidth;
-                canvas.height = canvas.width;
-                const ctx = canvas.getContext('2d');
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-                const allPaths = (data.paths || []).concat(data.out_paths || []);
-                allPaths.forEach(segment => {
-                    minX = Math.min(minX, segment[0].x, segment[1].x);
-                    maxX = Math.max(maxX, segment[0].x, segment[1].x);
-                    minY = Math.min(minY, segment[0].y, segment[1].y);
-                    maxY = Math.max(maxY, segment[0].y, segment[1].y);
-                });
-
-                const w = maxX - minX, h = maxY - minY;
-
-                if(w > 0 && h > 0) {
-                    const scale = Math.min(canvas.width / w, canvas.height / h) * 0.9;
-                    ctx.save();
-                    ctx.translate(canvas.width/2 - (w/2)*scale, canvas.height/2 - (h/2)*scale);
-                    ctx.lineWidth = 0.5;
-
-                    const drawLines = (pathList, colorStyle) => {
-                        if (!pathList) return;
-                        ctx.beginPath();
-                        pathList.forEach(s => {
-                            ctx.moveTo((s[0].x - minX) * scale, (maxY - s[0].y) * scale);
-                            ctx.lineTo((s[1].x - minX) * scale, (maxY - s[1].y) * scale);
-                        });
-                        ctx.strokeStyle = colorStyle;
-                        ctx.stroke();
-                    };
-                    drawLines(data.paths, isDarkMode ? '#4fd8eb' : '#006874');
-                    drawLines(data.out_paths, '#ff0000');
-                    ctx.restore();
-                }
+                renderCanvas2D(data);
             }
             document.getElementById('btn-plot').disabled = false;
             document.getElementById('btn-download').disabled = false;
-        } else showWarning(data.message);
-    } catch (err) {}
-
-    isPreviewing = false;
-    if (pendingPreview) { pendingPreview = false; triggerPreview(); }
+        } else {
+            showWarning(data.message);
+        }
+    } catch (err) {
+    } finally {
+        if (loader && !pendingPreview) loader.style.display = 'none';
+        isPreviewing = false;
+        if (pendingPreview) {
+            pendingPreview = false;
+            triggerPreview();
+        }
+    }
 }
 
 function showHomeErrorPopup(msg) {
     const modal = document.getElementById('home-error-modal');
-    if (modal) {
-        modal.style.display = 'flex';
-    } else {
-        alert(msg || "Home the printer first before starting a direct plot!");
-    }
+    if (modal) modal.style.display = 'flex';
+    else alert(msg || "Home the printer first before starting a direct plot!");
 }
 
 document.getElementById('btn-plot').addEventListener('click', () => {
@@ -451,7 +748,7 @@ document.getElementById('btn-plot').addEventListener('click', () => {
 window.closePlotModal = function() {
     document.getElementById('plot-method-modal').style.display = 'none';
     document.getElementById('btn-plot').focus();
-}
+};
 
 function trapFocus(modal, e) {
     const focusable = modal.querySelectorAll('md-filled-button, md-filled-tonal-button, md-outlined-button');
@@ -462,29 +759,21 @@ function trapFocus(modal, e) {
 
     if (e.key === 'Tab') {
         if (e.shiftKey && document.activeElement === first) {
-            last.focus();
-            e.preventDefault();
+            last.focus(); e.preventDefault();
         } else if (!e.shiftKey && document.activeElement === last) {
-            first.focus();
-            e.preventDefault();
+            first.focus(); e.preventDefault();
         }
     }
 }
 
 document.getElementById('plot-method-modal').addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-        window.closePlotModal();
-    } else {
-        trapFocus(document.getElementById('plot-method-modal'), e);
-    }
+    if (e.key === 'Escape') window.closePlotModal();
+    else trapFocus(document.getElementById('plot-method-modal'), e);
 });
 
 document.getElementById('download-modal').addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-        window.closeDownloadModal();
-    } else {
-        trapFocus(document.getElementById('download-modal'), e);
-    }
+    if (e.key === 'Escape') window.closeDownloadModal();
+    else trapFocus(document.getElementById('download-modal'), e);
 });
 
 document.getElementById('model-modal').addEventListener('keydown', (e) => {
@@ -581,6 +870,7 @@ function resetPlottingUI() {
     document.getElementById('progress-bar').style.background = 'var(--md-sys-color-primary)';
 }
 
+// Printer Status Polling Interval
 setInterval(async () => {
     try {
         const res = await fetch('/api/state');

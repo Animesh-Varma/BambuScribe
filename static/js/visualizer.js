@@ -1,14 +1,27 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
+let LineSegments2, LineSegmentsGeometry, LineMaterial;
+try {
+    const linesMod = await import('three/addons/lines/LineSegments2.js');
+    const geomMod = await import('three/addons/lines/LineSegmentsGeometry.js');
+    const matMod = await import('three/addons/lines/LineMaterial.js');
+    LineSegments2 = linesMod.LineSegments2;
+    LineSegmentsGeometry = geomMod.LineSegmentsGeometry;
+    LineMaterial = matMod.LineMaterial;
+} catch (e) {
+    LineSegments2 = null;
+}
+
 export class PlotterVisualizer {
     constructor(containerId) {
-        const container = document.getElementById(containerId);
+        this.container = document.getElementById(containerId);
         this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+        this.camera = new THREE.PerspectiveCamera(45, this.container.clientWidth / this.container.clientHeight, 0.1, 1000);
         this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-        this.renderer.setSize(container.clientWidth, container.clientHeight);
-        container.appendChild(this.renderer.domElement);
+        this.renderer.setSize(this.container.clientWidth, this.container.clientHeight);
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        this.container.appendChild(this.renderer.domElement);
 
         this.controls = new OrbitControls(this.camera, this.renderer.domElement);
         this.controls.enableDamping = true;
@@ -30,6 +43,22 @@ export class PlotterVisualizer {
 
         this.textPathsGroup = new THREE.Group();
         this.scene.add(this.textPathsGroup);
+
+        this.penWidth = 0.3;
+        this.materials = [];
+        this.lastPreviewArgs = null;
+
+        window.addEventListener('resize', () => {
+            if (!this.container) return;
+            const w = this.container.clientWidth;
+            const h = this.container.clientHeight;
+            this.camera.aspect = w / h;
+            this.camera.updateProjectionMatrix();
+            this.renderer.setSize(w, h);
+            this.materials.forEach(m => {
+                if (m.resolution) m.resolution.set(w, h);
+            });
+        });
 
         this.animate = this.animate.bind(this);
         this.animate();
@@ -73,7 +102,7 @@ export class PlotterVisualizer {
             const maxX = Math.max(...bboxPoints.map(p => p.x));
             const minY = Math.min(...bboxPoints.map(p => p.y));
             const maxY = Math.max(...bboxPoints.map(p => p.y));
-            const z = bboxPoints[0].z;
+            const z = bboxPoints[0].z || 0;
 
             const corners = [ {x: minX, y: minY}, {x: maxX, y: minY}, {x: maxX, y: maxY}, {x: minX, y: maxY} ];
             corners.forEach((c, i) => {
@@ -82,35 +111,80 @@ export class PlotterVisualizer {
             });
         } else {
             bboxPoints.forEach((p, i) => {
-                this.bboxDots[i].position.set(p.x - bedSize/2, p.z, bedSize/2 - p.y);
+                this.bboxDots[i].position.set(p.x - bedSize/2, p.z || 0, bedSize/2 - p.y);
                 this.bboxDots[i].visible = true;
             });
         }
     }
 
     drawPreview(paths, outPaths, originZ, bedSize, isDarkMode) {
+        this.lastPreviewArgs = { paths, outPaths, originZ, bedSize, isDarkMode };
         this.textPathsGroup.clear();
+        this.materials = [];
+
         const inkColor = isDarkMode ? 0x4fd8eb : 0x006874;
         const outColor = 0xff0000;
+        const zPos = originZ !== undefined ? originZ : 0.2;
 
         const addPathGroup = (pathList, color) => {
             if (!pathList || pathList.length === 0) return;
-            const points = [];
-            pathList.forEach(segment => {
-                points.push(new THREE.Vector3(segment[0].x - bedSize/2, originZ, bedSize/2 - segment[0].y));
-                points.push(new THREE.Vector3(segment[1].x - bedSize/2, originZ, bedSize/2 - segment[1].y));
+
+            const segments = [];
+            pathList.forEach(poly => {
+                if (!poly || poly.length < 2) return;
+                for (let i = 0; i < poly.length - 1; i++) {
+                    segments.push(poly[i], poly[i + 1]);
+                }
             });
-            const geo = new THREE.BufferGeometry().setFromPoints(points);
-            const mat = new THREE.LineBasicMaterial({ color: color });
-            this.textPathsGroup.add(new THREE.LineSegments(geo, mat));
+
+            if (segments.length === 0) return;
+
+            if (LineSegments2 && LineSegmentsGeometry && LineMaterial) {
+                const positions = [];
+                segments.forEach(pt => {
+                    positions.push(pt.x - bedSize / 2, zPos, bedSize / 2 - pt.y);
+                });
+
+                const geo = new LineSegmentsGeometry();
+                geo.setPositions(positions);
+
+                const mat = new LineMaterial({
+                    color: color,
+                    linewidth: Math.max(0.02, this.penWidth),
+                    worldUnits: true,
+                    alphaToCoverage: true
+                });
+                mat.resolution.set(this.container.clientWidth, this.container.clientHeight);
+                this.materials.push(mat);
+
+                const line = new LineSegments2(geo, mat);
+                this.textPathsGroup.add(line);
+            } else {
+                const points = segments.map(pt => new THREE.Vector3(pt.x - bedSize / 2, zPos, bedSize / 2 - pt.y));
+                const geo = new THREE.BufferGeometry().setFromPoints(points);
+                const mat = new THREE.LineBasicMaterial({ color: color });
+                this.textPathsGroup.add(new THREE.LineSegments(geo, mat));
+            }
         };
 
         addPathGroup(paths, inkColor);
         addPathGroup(outPaths, outColor);
     }
 
+    setPenWidth(widthMm) {
+        this.penWidth = Math.max(0.02, parseFloat(widthMm));
+        this.materials.forEach(mat => {
+            if (mat.linewidth !== undefined) {
+                mat.linewidth = this.penWidth;
+                mat.needsUpdate = true;
+            }
+        });
+    }
+
     clearPaths() {
         this.textPathsGroup.clear();
+        this.materials = [];
+        this.lastPreviewArgs = null;
     }
 
     setZoom(val) {
