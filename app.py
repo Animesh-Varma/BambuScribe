@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, Response
+from flask import Flask, render_template, request, jsonify, Response, send_from_directory
 import threading
 import traceback
 
@@ -7,7 +7,7 @@ from backend.printer import setup_mqtt, send_gcode_chunk, send_printer_command, 
 from backend.algorithms import process_paths_request, generate_full_gcode
 from backend.camera import generate_bambu_camera_stream
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder='.')
 
 # Start MQTT Connection globally
 setup_mqtt()
@@ -15,6 +15,10 @@ setup_mqtt()
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/backend/<path:filename>')
+def serve_backend(filename):
+    return send_from_directory('backend', filename)
 
 @app.route('/video_feed')
 def video_feed():
