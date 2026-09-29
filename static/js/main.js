@@ -77,7 +77,7 @@ function enableWebMode() {
 
     const badge = document.getElementById('mode-badge');
     if (badge) {
-        badge.textContent = 'Web Mode (Serverless)';
+        badge.textContent = 'Web Mode';
         badge.style.background = 'rgba(230, 81, 0, 0.12)';
         badge.style.color = '#e65100';
     }

@@ -24,8 +24,8 @@ After my search, the best one to my knowledge is the **A1 Plotter Module** desig
 One thing I noticed with existing mounts is that the pen is physically offset from the nozzle. Because of this, I will be designing a custom pen holder by the next release. **If anyone has experience in CAD software, please help me with this!** 
 
 **Crucial Hardware Recommendations:**
-1. **Flip the Build Plate:** Turn your build plate over to the smooth/blank side before plotting. This provides a better drawing surface and protects your textured PEI coating from accidental ink stains or scratches.
-2. **Set Pen Lower Than Nozzle:** Ensure the tip of your pen (should be a ball point!!) extends further down than the printer's hotend nozzle. Because BambuScribe uses dynamic Z-axis bounding boxes, this ensures the pen tip is the only thing making contact with your paper, preventing the nozzle from accidentally striking the bed.
+1. **Flip the Build Plate:** Turn your build plate over before plotting. This provides a better drawing surface and protects your textured PEI coating from accidental ink stains or scratches.
+2. **Set Pen Lower Than Nozzle:** Ensure the tip of your pen (should be a ball point!!) extends further down than the printer's hotend nozzle. Because BambuScribe uses dynamic Z-axis bounding boxes, this ensures the pen tip is the only thing making contact with your paper, preventing the nozzle from accidentally striking the bed (some plotting modes benefit from the pen being as sturdy as possible; for them, try to keep the pen as close to the mount body as possible, hence minimizing shaking).
 3. **Use Bed Magnets:** It is highly recommended to secure your paper using strong magnets placed along the edges of your build plate to prevent the paper from sliding or shifting during rapid movement.
 
 <div align="center">
