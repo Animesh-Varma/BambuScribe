@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BambuScribe</title>
+
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
+    <link rel="stylesheet" href="./static/css/style.css">
+    <script type="module" src="https://esm.run/@material/web/all.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <style>
+        /* Fast-Reveal Material 3 Floating Tooltip */
+        #m3-tooltip {
+            position: fixed;
+            z-index: 100000;
+            pointer-events: none;
+            background: var(--md-sys-color-inverse-surface, #313033);
+            color: var(--md-sys-color-inverse-on-surface, #f4eff4);
+            font-family: Roboto, system-ui, sans-serif;
+            font-size: 12px;
+            font-weight: 500;
+            line-height: 16px;
+            padding: 6px 12px;
+            border-radius: 8px;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+            max-width: 290px;
+            opacity: 0;
+            transform: scale(0.94) translateY(4px);
+            transition: opacity 0.1s cubic-bezier(0.2, 0, 1), transform 0.1s cubic-bezier(0.2, 0, 1);
+            white-space: normal;
+            word-break: normal;
+        }
+        #m3-tooltip.visible {
+            opacity: 1;
+            transform: scale(1) translateY(0);
+        }
+        .m3-tooltip-target {
+            cursor: help;
+        }
+        .m3-help-icon {
+            font-size: 15px;
+            vertical-align: middle;
+            opacity: 0.65;
+            margin-left: 4px;
+            cursor: help;
+        }
+        .m3-help-icon:hover {
+            opacity: 1;
+            color: var(--md-sys-color-primary);
+        }
+    </style>
+</head>
+<body>
+    <!-- Material 3 Dynamic Floating Tooltip Element -->
+    <div id="m3-tooltip" role="tooltip"></div>
+
+    <div id="model-modal" role="dialog" aria-modal="true" aria-labelledby="model-modal-title" style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; display:flex; align-items:center; justify-content:center;">
+        <div style="background:var(--surface-color); padding:32px; border-radius:24px; text-align:center; max-width:400px; box-shadow: 0 8px 24px rgba(0,0,0,0.2);">
+            <h2 id="model-modal-title" style="margin-top:0;">Select Printer Model</h2>
+            <p style="margin-bottom:24px; color:var(--text-color);">Choose your 3D printer model to configure the correct bed size for plotting.</p>
+            <div style="display:flex; flex-direction:column; gap:16px;">
+                <md-filled-button onclick="selectModel(180)">A1 mini (180x180x180)</md-filled-button>
+                <md-filled-tonal-button onclick="selectModel(256)">A1 (Beta) (256x256x256)</md-filled-tonal-button>
+            </div>
+        </div>
+    </div>
+
+    <div id="plot-method-modal" role="dialog" aria-modal="true" aria-labelledby="plot-method-title" style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; display:none; align-items:center; justify-content:center;">
+        <div style="background:var(--surface-color); padding:32px; border-radius:24px; text-align:center; max-width:400px; box-shadow: 0 8px 24px rgba(0,0,0,0.2);">
+            <h2 id="plot-method-title" style="margin-top:0;">Select Plotting Method</h2>
+            <p style="margin-bottom:24px; color:var(--text-color);">Stream via WiFi for live control, or send the entire file to the printer's SD card to run autonomously.</p>
+            <div style="display:flex; flex-direction:column; gap:16px;">
+                <md-filled-button id="btn-sd-plot" onclick="startPlot('send')"><md-icon slot="icon">sd_card</md-icon> Send to SD Card</md-filled-button>
+                <md-filled-tonal-button onclick="startPlot('stream')"><md-icon slot="icon">wifi</md-icon> Stream via WiFi</md-filled-tonal-button>
+                <md-outlined-button onclick="closePlotModal()">Cancel</md-outlined-button>
+            </div>
+        </div>
+    </div>
+
+    <div id="download-modal" role="dialog" aria-modal="true" aria-labelledby="download-modal-title" style="position: fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:9999; display:none; align-items:center; justify-content:center;">
+        <div style="background:var(--surface-color); padding:32px; border-radius:24px; max-width:560px; box-shadow: 0 8px 24px rgba(0,0,0,0.2);">
+            <h2 id="download-modal-title" style="margin-top:0; display:flex; align-items:center; gap:8px;"><md-icon style="color:var(--md-sys-color-primary);">info</md-icon> Standalone Plot Instructions</h2>
+            <div style="margin-bottom:24px; color:var(--text-color); font-size:15px; line-height:1.5;">
+                <p>Because this file will be executed directly from the printer, it contains an automated safety sequence:</p>
+                <div style="margin: 14px 0; padding: 10px 14px; background: rgba(211, 47, 47, 0.1); border-left: 4px solid #d32f2f; border-radius: 6px; font-size: 14px;">
+                    <strong>Crucial:</strong> <b>Auto Bed Leveling</b>, <b>Timelapse</b>, <b>Flow Calibration</b>, and any other pre-print calibrations <b>MUST</b> be toggled OFF when starting this print to prevent toolhead collisions.
+                </div>
+                <ol style="margin-top: 10px; padding-left: 20px; display: flex; flex-direction: column; gap: 10px;">
+                    <li>Transfer the downloaded <b>.gcode</b> file onto the printer's MicroSD card, make sure all calibrations are unchecked, and start the job.</li>
+                    <li><strong>Pause 1 (Safety Warning):</strong> The printer will immediately pause. Make sure your pen/attachment is <b>REMOVED</b> so it does not collide with the bed, then press <b>Resume</b>.</li>
+                    <li><strong>Homing:</strong> The machine will safely home all axes and move the toolhead to the side.</li>
+                    <li><strong>Pause 2 (Energized Setup):</strong> The printer will pause again with <b>motors locked</b>. Mount your paper and pen at the desired location, and press <b>Resume</b> to plot!</li>
+                </ol>
+                <p style="margin-top: 14px; margin-bottom: 0; font-size: 13.5px; opacity: 0.85;">
+                    <b>Note:</b> Long pauses after pressing <b>Resume</b> are completely normal while the firmware processes commands.
+                </p>
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:12px;">
+                <md-outlined-button onclick="closeDownloadModal()">Cancel</md-outlined-button>
+                <md-filled-button onclick="confirmDownloadGCode()"><md-icon slot="icon">download</md-icon> Got it, Download</md-filled-button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Home Error Popup Modal -->
+    <div id="home-error-modal" role="dialog" aria-modal="true" aria-labelledby="home-error-title" aria-describedby="home-error-desc" style="position: fixed; inset: 0; background: rgba(0, 0, 0, 0.32); backdrop-filter: blur(2px); z-index: 10000; display: none; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box;">
+        <div style="background: var(--md-sys-color-surface-container-high, var(--surface-color, #ece6f0)); padding: 28px 24px 24px 24px; border-radius: 28px; width: 100%; max-width: 340px; box-shadow: 0 6px 10px rgba(0, 0, 0, 0.14); box-sizing: border-box; display: flex; flex-direction: column; align-items: stretch;">
+            <h2 id="home-error-title" style="margin: 0 auto 12px auto; width: 100%; display: flex; justify-content: center; text-align: center !important; font-family: Roboto, system-ui, sans-serif; font-size: 22px; font-weight: 500; line-height: 28px; color: #e57373;">
+                Homing Required
+            </h2>
+            <p id="home-error-desc" style="margin: 0 0 24px 0; width: 100%; text-align: center !important; font-family: Roboto, system-ui, sans-serif; font-size: 14px; font-weight: 400; line-height: 20px; color: var(--md-sys-color-on-surface-variant, #49454f);">
+                Home the printer first before starting a direct plot.
+            </p>
+            <div style="display: flex; width: 100%;">
+                <md-filled-button style="width: 100%;" onclick="document.getElementById('home-error-modal').style.display='none'">
+                    Got it
+                </md-filled-button>
+            </div>
+        </div>
+    </div>
+
+    <div class="header">
+        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <h1>BambuScribe</h1>
+            <span id="mode-badge" style="font-size: 12px; font-weight: 500; padding: 4px 10px; border-radius: 12px; background: rgba(0, 104, 116, 0.12); color: var(--md-sys-color-primary);">Checking Mode...</span>
+        </div>
+        <md-icon-button id="theme-toggle"><md-icon>dark_mode</md-icon></md-icon-button>
+    </div>
+
+    <div class="container">
+        <!-- Visualizer Card Window -->
+        <div class="card" id="card-visualizer" style="height: 100%; box-sizing: border-box; position: relative;">
+            <div id="visualizer-sticky-wrapper" style="position: sticky; top: 16px; display: flex; flex-direction: column; gap: 8px;">
+                <h2><md-icon>deployed_code</md-icon> Visualizer</h2>
+                <div id="canvas-container"></div>
+                <div class="zoom-controls">
+                    <md-icon title="Visualizer Zoom">zoom_in</md-icon>
+                    <md-slider id="vis-zoom" min="0.5" max="5.0" value="1.0" step="0.1" style="flex: 1;"></md-slider>
+                </div>
+                <p id="coord-display" style="font-weight: bold; text-align: center; margin-top: 6px; font-size: 18px;">X: 0.0 | Y: 0.0 | Z: 0.0</p>
+            </div>
+        </div>
+
+        <!-- Controls Card -->
+        <div class="card" id="card-controls">
+            <h2 id="card-controls-title"><md-icon>gamepad</md-icon> Controls</h2>
+            <div id="warning-banner"></div>
+
+            <!-- ONLINE WEB MODE ONLY: Static BBox Dimensions & Toolhead Height Setup -->
+            <div id="static-bbox-controls" style="display: none; flex-direction: column; gap: 12px; margin-bottom: 8px; padding: 14px; background: var(--bg-color); border-radius: 14px; border: 1px solid var(--border-color);">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-weight: 500; font-size: 14px;">Bounding Box Dimensions</span>
+                    <span class="m3-help-icon m3-tooltip-target" data-tooltip="Sets the plotting area dimensions on the bed in millimeters.">
+                        <md-icon style="font-size: 16px;">info</md-icon>
+                    </span>
+                </div>
+
+                <!-- BBox Presets -->
+                <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                    <md-outlined-button class="btn-bbox-preset" data-preset="center-100" style="flex: 1; min-width: 85px;">Center 100</md-outlined-button>
+                    <md-outlined-button class="btn-bbox-preset" data-preset="full" style="flex: 1; min-width: 80px;">Full Bed</md-outlined-button>
+                    <md-outlined-button class="btn-bbox-preset" data-preset="a6" style="flex: 1; min-width: 60px;">A6</md-outlined-button>
+                    <md-outlined-button class="btn-bbox-preset" data-preset="a5" style="flex: 1; min-width: 60px;">A5</md-outlined-button>
+                </div>
+
+                <!-- Static Width/Height & Center Coordinates -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <md-outlined-text-field id="bbox-width" type="number" label="Width (mm)" value="100"></md-outlined-text-field>
+                    <md-outlined-text-field id="bbox-height" type="number" label="Height (mm)" value="100"></md-outlined-text-field>
+                    <md-outlined-text-field id="bbox-center-x" type="number" label="Center X (mm)" value="90"></md-outlined-text-field>
+                    <md-outlined-text-field id="bbox-center-y" type="number" label="Center Y (mm)" value="90"></md-outlined-text-field>
+                </div>
+
+                <!-- Toolhead Contact Height (Z) -->
+                <div style="display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border-color); padding-top: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 13px; font-weight: 500;" class="m3-tooltip-target" data-tooltip="The physical Z height the 3D printer carriage lowers to during drawing moves. NOT the length of the pen.">
+                            Toolhead Contact Height (Z)
+                            <md-icon class="m3-help-icon" style="font-size:14px;">info</md-icon>
+                        </span>
+                    </div>
+                    <md-outlined-text-field id="toolhead-z" type="number" label="Toolhead Height (Z)" value="30.00" step="0.5" suffix-text="mm" class="m3-tooltip-target" data-tooltip="The physical Z height the printer toolhead lowers to when drawing. Ensure your mounted pen touches the paper at this toolhead height."></md-outlined-text-field>
+                    <span style="font-size: 11.5px; opacity: 0.72; line-height: 1.35; color: var(--text-color);">
+                        *Height of the 3D printer toolhead carriage above the bed (not the pen length). Mount your pen so it touches the paper when the toolhead is at this height.
+                    </span>
+                </div>
+            </div>
+
+            <!-- OFFLINE LOCAL FLASK MODE: Original Jogging & 4-Point Manual Calibration -->
+            <div id="hardware-panel-wrapper" style="display: flex; flex-direction: column;">
+                <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                    <md-filled-button style="flex: 1;" id="btn-home"><md-icon slot="icon">home</md-icon> Home All</md-filled-button>
+                    <md-filled-tonal-button style="flex: 1;" id="btn-origin"><md-icon slot="icon">crop_free</md-icon> Set BBox (0/4)</md-filled-tonal-button>
+                </div>
+
+                <div id="bbox-manage-container" style="display: none; flex-direction: column; gap: 8px; margin-bottom: 10px; padding: 12px; background: var(--bg-color); border-radius: 12px; border: 1px solid var(--border-color);">
+                    <div style="font-weight: 500; font-size: 14px; margin-bottom: 4px;">Bounding Box Points</div>
+                    <div id="bbox-points-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
+                </div>
+
+                <div style="display: flex; gap: 10px; align-items: center; margin-top: 10px; margin-bottom: 10px;">
+                    <md-outlined-select id="manual-speed" label="Manual XY Speed" style="flex: 1;">
+                        <md-select-option value="5000"><div slot="headline">5000 mm/min</div></md-select-option>
+                        <md-select-option value="12000" selected><div slot="headline">12000 mm/min</div></md-select-option>
+                        <md-select-option value="18000"><div slot="headline">18000 mm/min (Max)</div></md-select-option>
+                    </md-outlined-select>
+
+                    <md-outlined-select id="manual-speed-z" label="Manual Z Speed" style="flex: 1;">
+                        <md-select-option value="400"><div slot="headline">400 mm/min</div></md-select-option>
+                        <md-select-option value="800"><div slot="headline">800 mm/min</div></md-select-option>
+                        <md-select-option value="1200" selected><div slot="headline">1200 mm/min (Max)</div></md-select-option>
+                    </md-outlined-select>
+                </div>
+
+                <div class="step-selector">
+                    <span style="font-weight: 500;">Dist:</span>
+                    <md-outlined-button class="quick-step" data-val="1">1 mm</md-outlined-button>
+                    <md-outlined-text-field id="step-input" type="number" value="1" style="width: 100px;" suffix-text="mm"></md-outlined-text-field>
+                    <md-outlined-button class="quick-step" data-val="10">10 mm</md-outlined-button>
+                </div>
+
+                <div class="controls-grid" id="movement-controls" style="opacity: 0.5; pointer-events: none;">
+                    <div class="axis-controls">
+                        <strong>X (Left/Right)</strong>
+                        <md-filled-tonal-button class="btn-move" data-axis="X" data-dir="1">X +</md-filled-tonal-button>
+                        <md-outlined-button class="btn-move" data-axis="X" data-dir="-1">X -</md-outlined-button>
+                    </div>
+                    <div class="axis-controls">
+                        <strong>Y (Fwd/Back)</strong>
+                        <md-filled-tonal-button class="btn-move" data-axis="Y" data-dir="1">Y +</md-filled-tonal-button>
+                        <md-outlined-button class="btn-move" data-axis="Y" data-dir="-1">Y -</md-outlined-button>
+                    </div>
+                    <div class="axis-controls">
+                        <strong>Z (Pen Up/Dn)</strong>
+                        <md-filled-tonal-button class="btn-move" data-axis="Z" data-dir="1">Z Up</md-filled-tonal-button>
+                        <md-outlined-button class="btn-move" data-axis="Z" data-dir="-1">Z Down</md-outlined-button>
+                    </div>
+                </div>
+
+                <div id="queue-display">Command Queue Empty</div>
+            </div>
+        </div>
+
+        <!-- Plotting Engine Card -->
+        <div class="card full-width">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px;">
+                <h2><md-icon>draw</md-icon> Plotting Engine</h2>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <md-filled-button id="btn-tab-text" onclick="window.setTab('text')"><md-icon slot="icon">text_fields</md-icon> Write Text</md-filled-button>
+                    <md-outlined-button id="btn-tab-img" onclick="window.setTab('image')"><md-icon slot="icon">image</md-icon> Plot Image</md-outlined-button>
+                </div>
+            </div>
+
+            <!-- Material 3 Expressive Circular Loader -->
+            <div id="engine-loader" style="display: none; align-items: center; justify-content: center; gap: 12px; padding: 10px 16px; margin-bottom: 16px; background: rgba(0, 104, 116, 0.08); border-radius: 12px; border: 1px solid var(--border-color);">
+                <md-circular-progress indeterminate style="--md-circular-progress-size: 28px;"></md-circular-progress>
+                <span id="engine-loader-text" style="font-size: 13.5px; font-weight: 500; color: var(--md-sys-color-primary, #006874);">Generating vector toolpaths...</span>
+            </div>
+
+            <!-- Toolhead Setup Bar -->
+            <div style="display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 14px; padding: 14px 20px; margin-bottom: 20px;">
+                <!-- Native Pen Size Slider -->
+                <div class="slider-item" style="margin: 0;">
+                    <div class="slider-label">
+                        <span>
+                            <strong class="m3-tooltip-target" data-tooltip="Physical tip width of your mounted pen (e.g. 0.02 mm ultra-fine capillary, 0.30 mm fineliner, 0.50 mm gel pen). Accurately simulates line thickness on page.">Line Width / Pen Size</strong>
+                            <md-icon class="m3-help-icon m3-tooltip-target" data-tooltip="Physical tip width of your mounted pen (e.g. 0.02 mm ultra-fine capillary, 0.30 mm fineliner, 0.50 mm gel pen). Accurately simulates line thickness on page.">help_outline</md-icon>
+                        </span>
+                        <span id="label-pen-width" style="font-weight: 700; font-family: monospace; font-size: 14px;">0.30 mm</span>
+                    </div>
+                    <md-slider id="vis-pen-width" min="0.02" max="1.50" value="0.30" step="0.02"></md-slider>
+                </div>
+
+                <!-- Z-Hop Text Field -->
+                <div style="display: flex; align-items: center;">
+                    <md-outlined-text-field id="global-zhop" type="number" label="Pen Z-Hop" value="4" suffix-text="mm" style="width: 140px;" class="m3-tooltip-target" data-tooltip="Height the pen lifts above the paper during rapid travel moves."></md-outlined-text-field>
+                </div>
+            </div>
+
+            <!-- Text View -->
+            <div id="view-text">
+                <p style="font-size: 13px; color: #666; margin: 0 0 16px 0;">
+                    <md-icon style="font-size:16px; vertical-align:middle;">info</md-icon>
+                    The top of the bounding box will align with the top line of a lined paper. Line gap represents the distance to the next line. Font scale sets the letter size within that gap.
+                </p>
+                <div class="editor-settings">
+                    <md-outlined-select id="doc-font" label="Font Style">
+                        <md-select-option value="scripts" selected><div slot="headline">Cursive (Single)</div></md-select-option>
+                        <md-select-option value="rowmans"><div slot="headline">Standard (Single)</div></md-select-option>
+                        <md-select-option value="scriptc"><div slot="headline">Fancy Cursive</div></md-select-option>
+                    </md-outlined-select>
+                    <md-outlined-text-field id="doc-spacing" type="number" label="Line Gap (mm)" value="10"></md-outlined-text-field>
+                    <md-outlined-text-field id="doc-size" type="number" label="Scale (%)" value="100"></md-outlined-text-field>
+
+                    <md-outlined-select id="doc-speed" label="Plot Speed">
+                        <md-select-option value="2000"><div slot="headline">Slow (2000)</div></md-select-option>
+                        <md-select-option value="5000" selected><div slot="headline">Normal (5000)</div></md-select-option>
+                        <md-select-option value="12000"><div slot="headline">Fast (12000)</div></md-select-option>
+                        <md-select-option value="18000"><div slot="headline">Max (18000)</div></md-select-option>
+                    </md-outlined-select>
+                </div>
+                <div style="margin-bottom: 16px; display: flex; gap: 24px;">
+                    <label style="display: flex; align-items: center; gap: 8px;">
+                        <md-checkbox id="doc-auto-wrap" checked></md-checkbox>
+                        <span style="font-weight: 500; font-size: 14px;">Auto-Wrap Text</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px;">
+                        <md-checkbox id="doc-draw-bbox"></md-checkbox>
+                        <span style="font-weight: 500; font-size: 14px;">Draw Bounding Box</span>
+                    </label>
+                </div>
+                <textarea class="editor-input" id="doc-text" placeholder="Type text here..."></textarea>
+            </div>
+
+            <!-- Image View -->
+            <div id="view-image" style="display: none; grid-template-columns: 1fr 1fr; gap: 24px;">
+                <div style="display: flex; flex-direction: column; gap: 16px;">
+                    <div style="display: flex; gap: 16px;">
+                        <div class="img-uploader" id="upload-box" onclick="document.getElementById('img-input').click()">
+                            <md-icon style="font-size: 48px; color: var(--md-sys-color-primary);">add_photo_alternate</md-icon>
+                            <p style="font-size: 16px; font-weight: 500; margin: 10px 0 0 0;">Upload Image</p>
+                            <input type="file" id="img-input" accept="image/png, image/jpeg, image/webp" style="display: none;">
+                        </div>
+                        <div id="preview-wrapper" style="display: none; flex: 1; flex-direction: column; gap: 12px; align-items: center; width: 100%;">
+                            <canvas id="preview-2d" style="width: 100%; aspect-ratio: 1; border: 1px solid var(--border-color); border-radius: 12px; background: var(--canvas-bg);"></canvas>
+                            <md-outlined-button onclick="clearImage()" style="width: 100%;"><md-icon slot="icon">delete</md-icon> Clear Image</md-outlined-button>
+                        </div>
+                    </div>
+
+                    <!-- Clean Algorithm Options with M3 Tooltip Metadata -->
+                    <md-outlined-select id="img-method" label="Plotting Method" style="width: 100%;">
+                        <md-select-option value="hatch" selected data-tooltip="Classic multi-directional crosshatching. Maps grayscale tone darkness to shading line density.">
+                            <div slot="headline">Crosshatching</div>
+                        </md-select-option>
+                        <md-select-option value="skeleton" data-tooltip="Morphological thinning to 1-pixel spines. Eliminates double-outlining on signatures, line art, and handwriting.">
+                            <div slot="headline">Centerline / Skeleton</div>
+                        </md-select-option>
+                        <md-select-option value="spiral" data-tooltip="Continuous Archimedean spiral with tone-modulated sine waves. Plots portraits with zero pen lifts.">
+                            <div slot="headline">Archimedean Spiral</div>
+                        </md-select-option>
+                        <md-select-option value="squiggle" data-tooltip="Continuous boustrophedon serpentine raster scanlines with tone-modulated wave amplitude.">
+                            <div slot="headline">Serpentine Squiggle</div>
+                        </md-select-option>
+                        <md-select-option value="flow_field" data-tooltip="Structure Tensor Edge Tangent Flow streamlines. Generates classic copperplate and woodcut engraving aesthetics.">
+                            <div slot="headline">Flow Field Engraving</div>
+                        </md-select-option>
+                        <md-select-option value="stipple" data-tooltip="Blue-noise tone-weighted dot sampling relaxed via spatial repulsion. Draws distinct micro-dots.">
+                            <div slot="headline">Blue-Noise Stipple</div>
+                        </md-select-option>
+                        <md-select-option value="contours" data-tooltip="Multi-level iso-luminance topographic contour elevation slices across tone depths.">
+                            <div slot="headline">Topographic Contours</div>
+                        </md-select-option>
+                        <md-select-option value="canny" data-tooltip="Canny hysteresis gradient filter for tracing high-contrast vector outlines.">
+                            <div slot="headline">Vector Edge Tracing</div>
+                        </md-select-option>
+                        <md-select-option value="tsp" data-tooltip="Travelling Salesperson Tour connecting blue-noise stipple nodes into a continuous single-line path.">
+                            <div slot="headline">TSP Tour</div>
+                        </md-select-option>
+                    </md-outlined-select>
+
+                    <!-- Dynamic Method Explanation Badge -->
+                    <div id="method-description" style="font-size: 12.5px; opacity: 0.85; line-height: 1.4; padding: 6px 12px; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px; display: flex; align-items: center; gap: 8px;">
+                        <md-icon style="font-size: 16px; color: var(--md-sys-color-primary);">info</md-icon>
+                        <span id="method-description-text">Classic multi-directional crosshatching. Maps grayscale tone darkness to shading line density.</span>
+                    </div>
+
+                    <!-- Path Optimizer Settings with Informational Tooltips -->
+                    <div id="opt-panel" style="border: 1px solid var(--border-color); border-radius: 14px; padding: 16px; background: var(--bg-color); display: flex; flex-direction: column; gap: 14px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between;">
+                            <div style="font-weight: 500; font-size: 14px; display: flex; align-items: center; gap: 8px;">
+                                <md-icon style="font-size: 18px; color: var(--md-sys-color-primary);">tune</md-icon>
+                                <span>Path Optimizer (0.02 mm Precision)</span>
+                            </div>
+                            <span class="m3-help-icon m3-tooltip-target" data-tooltip="Sub-line-width vector optimizations. Protects microscopic details.">
+                                <md-icon style="font-size: 16px;">info</md-icon>
+                            </span>
+                        </div>
+
+                        <!-- Noise Filter Slider -->
+                        <div class="slider-item">
+                            <div class="slider-label">
+                                <span>
+                                    <span class="m3-tooltip-target" data-tooltip="Discards tiny micro-noise strokes shorter than this length. Defaults to 0.02 mm.">Min Stroke Length (Noise Filter)</span>
+                                </span>
+                                <span id="label-min-stroke" style="font-family: monospace;">0.02 mm</span>
+                            </div>
+                            <md-slider id="opt-min-stroke" min="0.0" max="0.5" value="0.02" step="0.01"></md-slider>
+                        </div>
+
+                        <!-- Gap Stitching Slider -->
+                        <div class="slider-item">
+                            <div class="slider-label">
+                                <span>
+                                    <span class="m3-tooltip-target" data-tooltip="Bridges small gaps between consecutive strokes with a drawing move. Kept at 0.00 mm (Safe) to prevent visible dragging marks.">Gap Stitching (Air Gaps)</span>
+                                </span>
+                                <span id="label-stitch-gap" style="font-family: monospace;">0.00 mm (Safe)</span>
+                            </div>
+                            <md-slider id="opt-stitch-gap" min="0.0" max="1.5" value="0.0" step="0.05"></md-slider>
+                        </div>
+
+                        <!-- Path Simplification Slider -->
+                        <div class="slider-item">
+                            <div class="slider-label">
+                                <span>
+                                    <span class="m3-tooltip-target" data-tooltip="Ramer-Douglas-Peucker simplification tolerance. Strips redundant collinear vertices without rounding corners.">Path Simplification (RDP &epsilon;)</span>
+                                </span>
+                                <span id="label-rdp-eps" style="font-family: monospace;">0.008 mm</span>
+                            </div>
+                            <md-slider id="opt-rdp-eps" min="0.002" max="0.04" value="0.008" step="0.002"></md-slider>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Context-Sensitive Algorithm Sliders -->
+                <div class="slider-group">
+                    <label id="item-img-draw-bbox" style="display: flex; align-items: center; gap: 8px;">
+                        <md-checkbox id="img-draw-bbox"></md-checkbox>
+                        <span style="font-weight: 500; font-size: 14px;">Draw Bounding Box</span>
+                    </label>
+
+                    <!-- Dynamically labeled & hidden for algos that do not use gap -->
+                    <div class="slider-item" id="item-img-gap">
+                        <div class="slider-label">
+                            <span id="title-img-gap" class="m3-tooltip-target" data-tooltip="Spacing between adjacent hatch lines or continuous tracks.">Line Gap / Spacing</span>
+                            <span id="label-gap" style="font-family: monospace;">1.0 mm</span>
+                        </div>
+                        <md-slider id="img-gap" min="0.2" max="3.0" value="1.0" step="0.1"></md-slider>
+                    </div>
+
+                    <!-- Contrast / Threshold Slider -->
+                    <div class="slider-item" id="item-img-contrast">
+                        <div class="slider-label">
+                            <span id="title-img-contrast" class="m3-tooltip-target" data-tooltip="Image contrast enhancement curve applied prior to vector generation.">Contrast / Threshold</span>
+                            <span id="label-contrast" style="font-family: monospace;">1.5 x</span>
+                        </div>
+                        <md-slider id="img-contrast" min="0.5" max="4.0" value="1.5" step="0.1"></md-slider>
+                    </div>
+
+                    <!-- Contour Slices: Visible only in Topographic Contours mode -->
+                    <div class="slider-item" id="item-img-levels" style="display: none;">
+                        <div class="slider-label">
+                            <span class="m3-tooltip-target" data-tooltip="Number of distinct iso-luminance / topographic elevation levels extracted across tone depths.">Contour Slices (Levels)</span>
+                            <span id="label-contour-levels" style="font-family: monospace;">6</span>
+                        </div>
+                        <md-slider id="opt-contour-levels" min="2" max="16" value="6" step="1"></md-slider>
+                    </div>
+
+                    <div class="slider-item" id="item-img-scale">
+                        <div class="slider-label"><span>Scale / Resize</span><span id="label-scale" style="font-family: monospace;">100 %</span></div>
+                        <md-slider id="img-scale" min="10" max="300" value="100" step="1"></md-slider>
+                    </div>
+
+                    <div class="slider-item" id="item-img-rotate">
+                        <div class="slider-label"><span>Rotation</span><span id="label-rotate" style="font-family: monospace;">0 &deg;</span></div>
+                        <md-slider id="img-rotate" min="-180" max="180" value="0" step="1"></md-slider>
+                    </div>
+
+                    <div style="display: flex; gap: 16px;" id="item-img-offsets">
+                        <md-outlined-text-field id="img-offset-x" type="number" label="Offset X (mm)" value="0" style="flex:1;"></md-outlined-text-field>
+                        <md-outlined-text-field id="img-offset-y" type="number" label="Offset Y (mm)" value="0" style="flex:1;"></md-outlined-text-field>
+                    </div>
+
+                    <md-outlined-select id="img-speed" label="Plot Speed">
+                        <md-select-option value="2000"><div slot="headline">Slow (2000)</div></md-select-option>
+                        <md-select-option value="5000"><div slot="headline">Normal (5000)</div></md-select-option>
+                        <md-select-option value="12000" selected><div slot="headline">Fast (12000)</div></md-select-option>
+                        <md-select-option value="18000"><div slot="headline">Max (18000)</div></md-select-option>
+                    </md-outlined-select>
+                </div>
+            </div>
+
+            <div id="progress-container" style="display:none; margin-top: 16px; flex-direction: column; gap: 8px;">
+                <div style="display:flex; justify-content:space-between; font-weight:500;">
+                    <span id="progress-text">Status: 0%</span>
+                </div>
+                <div style="width:100%; background:var(--canvas-bg); height:8px; border-radius:4px; overflow:hidden;">
+                    <div id="progress-bar" style="width:0%; background:var(--md-sys-color-primary); height:100%; transition:width 0.3s, background 0.3s;"></div>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 16px; justify-content: flex-end; margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 20px;">
+                <md-outlined-button id="btn-download" disabled onclick="downloadGCode()"><md-icon slot="icon">download</md-icon> Download .gcode</md-outlined-button>
+                <md-filled-button id="btn-plot" disabled><md-icon slot="icon">play_arrow</md-icon> Start Plotting!</md-filled-button>
+                <md-filled-button id="btn-pause" style="display: none;"><md-icon slot="icon">pause</md-icon> Pause</md-filled-button>
+                <md-filled-button id="btn-resume" style="display: none;"><md-icon slot="icon">play_arrow</md-icon> Resume</md-filled-button>
+                <md-filled-button id="btn-estop" style="display: none; --md-sys-color-primary: #ba1a1a; --md-sys-color-on-primary: #ffffff;"><md-icon slot="icon">stop</md-icon> Cancel / Done</md-filled-button>
+            </div>
+        </div>
+
+        <!-- Camera Feed Card -->
+        <div class="card full-width" id="card-camera">
+            <h2><md-icon>videocam</md-icon> Live Camera Feed</h2>
+            <div class="camera-container" id="camera-container">
+                <img id="camera-stream" src="/video_feed" alt="Camera Stream" style="display: block; width: 100%; height: 100%; object-fit: contain;">
+                <div id="camera-offline-msg" style="display: none; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: #888; text-align: center; padding: 20px;">
+                    <md-icon style="font-size: 48px; opacity: 0.6;">videocam_off</md-icon>
+                    <span style="font-size: 15px; font-weight: 500;">Camera stream offline</span>
+                    <span style="font-size: 12.5px; opacity: 0.75; max-width: 320px;">Live video feed requires running BambuScribe locally with your Bambu printer over WiFi.</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="./static/js/main.js"></script>
+</body>
+</html>
