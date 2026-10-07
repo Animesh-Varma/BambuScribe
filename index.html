@@ -80,7 +80,7 @@
             <p style="margin-bottom:24px; color:var(--text-color);">Stream via WiFi for live control, or send the entire file to the printer's SD card to run autonomously.</p>
             <div style="display:flex; flex-direction:column; gap:16px;">
                 <md-filled-button id="btn-sd-plot" onclick="startPlot('send')"><md-icon slot="icon">sd_card</md-icon> Send to SD Card</md-filled-button>
-                <md-filled-tonal-button onclick="startPlot('stream')"><md-icon slot="icon">wifi</md-icon> Stream via WiFi</md-filled-button>
+                <md-filled-tonal-button onclick="startPlot('stream')"><md-icon slot="icon">wifi</md-icon> Stream via WiFi</md-filled-tonal-button>
                 <md-outlined-button onclick="closePlotModal()">Cancel</md-outlined-button>
             </div>
         </div>
@@ -472,7 +472,7 @@
                     <md-outlined-select id="img-speed" label="Plot Speed">
                         <md-select-option value="2000"><div slot="headline">Slow (2000)</div></md-select-option>
                         <md-select-option value="5000" selected><div slot="headline">Normal (5000)</div></md-select-option>
-                        <md-select-option value="12000" selected><div slot="headline">Fast (12000)</div></md-select-option>
+                        <md-select-option value="12000"><div slot="headline">Fast (12000)</div></md-select-option>
                         <md-select-option value="18000"><div slot="headline">Max (18000)</div></md-select-option>
                     </md-outlined-select>
                 </div>

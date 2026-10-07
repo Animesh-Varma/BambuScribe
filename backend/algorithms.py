@@ -1019,7 +1019,7 @@ def process_paths_request(data):
     tol = float(data.get('tolerance', default_tol))
 
     # Strict noise filter and stitch gap to prevent lost dots or phantom marks
-    min_stroke = 0.0 if data.get('method') == 'stipple' else float(data.get('min_stroke_length', 0.02))
+    min_stroke = 0.0 if data.get('method') in ('stipple', 'tsp') else float(data.get('min_stroke_length', 0.02))
     stitch_gap = float(data.get('stitch_gap', 0.0))
 
     mid_pos = (float(bed_size) / 2.0, float(bed_size) / 2.0)
@@ -1035,12 +1035,14 @@ def process_paths_request(data):
     )
 
     if data.get('draw_bbox'):
+        bx0, by0 = max(0.0, min_x), max(0.0, min_y)
+        bx1, by1 = min(float(bed_size), max_x), min(float(bed_size), max_y)
         optimized_polylines.append([
-            {"x": min_x, "y": min_y},
-            {"x": max_x, "y": min_y},
-            {"x": max_x, "y": max_y},
-            {"x": min_x, "y": max_y},
-            {"x": min_x, "y": min_y}
+            {"x": bx0, "y": by0},
+            {"x": bx1, "y": by0},
+            {"x": bx1, "y": by1},
+            {"x": bx0, "y": by1},
+            {"x": bx0, "y": by0}
         ])
 
     return optimized_polylines, out_paths, "Success"

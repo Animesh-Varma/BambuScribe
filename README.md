@@ -65,7 +65,7 @@ One thing I noticed with existing mounts is that the pen is physically offset fr
   - Drastically optimizes drawing sequences and cuts plot times using sub-line-width Ramer–Douglas–Peucker (RDP) path decimation, segment sorting, and travel distance minimization.
 - **Dynamic Bounding Box Clipping & Out-of-Bounds Preview:**
   - Mathematically slices vector segments at bounding box boundaries without throwing hard stop errors.
-  - Slices paths into `safe_paths` (printable) and `out_paths` (clipped), dynamically rendering out-of-bounds segments in high-contrast red on both the 2D canvas and 3D visualizer.
+  - Slices paths into `paths` (printable) and `out_paths` (clipped), dynamically rendering out-of-bounds segments in high-contrast red on both the 2D canvas and 3D visualizer.
 - **Standalone G-code Export & SD Execution:**
   - Generate standalone, safe G-code with configurable plot parameters via `/api/download_gcode` or directly from the Web App.
   - Built-in 4-step standalone SD execution flow: *Pre-home warning pause → G28 auto-home → Energized pause → Plot execution*.
@@ -154,7 +154,7 @@ Before ink ever touches paper, input curves and vectors are processed through a 
 3. **TSP / Path Reordering:** Minimizes rapid travel moves and pen lifts using greedy nearest-neighbor Euclidean distance ordering.
 4. **Direction Optimization:** Dynamically flips polyline directions when drawing backwards is faster than moving to the start point.
 5. **Continuous Gap Stitching:** Bridges minute air gaps between consecutive segments to minimize unnecessary pen lifts.
-6. **Mathematical Clipping & Out-of-Bounds Classification:** Vectors intersecting canvas boundaries are cleanly sliced at bounding box edges; printable segments are placed in `safe_paths` while out-of-bounds segments are tagged as `out_paths` (displayed in red on the visualizer).
+6. **Mathematical Clipping & Out-of-Bounds Classification:** Vectors intersecting canvas boundaries are cleanly sliced at bounding box edges; printable segments are placed in `paths` while out-of-bounds segments are tagged as `out_paths` (displayed in red on the visualizer).
 
 ### **3. Autonomous SD Execution & Streaming**
 - **Autonomous SD / 3MF:** BambuScribe packages plotted toolpaths into a valid `.3mf` ZIP archive containing metadata files to satisfy the printer's internal parser. It uploads the package over Implicit FTPS (port 990) and commands the printer via MQTT to initiate printing.

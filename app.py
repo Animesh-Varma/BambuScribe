@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify, Response, send_from_directory
+import math
 import threading
 import traceback
 
@@ -37,6 +38,8 @@ def home_axes():
         if state.is_busy():
             return jsonify({"status": "error", "message": "Printer is actively plotting! Stop it first."}), 400
         bed_size = float(request.json.get('bed_size', 180.0)) if request.json else 180.0
+        if not math.isfinite(bed_size) or bed_size <= 0:
+            return jsonify({"status": "error", "message": "Invalid bed size."}), 400
         mid = bed_size / 2.0
         state.printer_state.update({"is_homed": True, "position": {"x": mid, "y": mid, "z": 90}, "progress": 0})
         state.save_state()
@@ -48,10 +51,13 @@ def move_axis():
     with state.state_lock:
         if state.is_busy(): return jsonify({"status": "error", "message": "Printer is actively plotting!"}), 400
         if not state.printer_state["is_homed"]: return jsonify({"status": "error", "message": "Home first!"}), 403
-        axis = request.json.get('axis').upper()
+        axis = request.json.get('axis', '').upper()
+        if axis not in ('X', 'Y', 'Z'):
+            return jsonify({"status": "error", "message": "Invalid axis specified."}), 400
         try:
             amount, speed, bed_size = float(request.json.get('amount')), float(request.json.get('speed', 12000)), float(request.json.get('bed_size', 180.0))
-            if speed <= 0 or bed_size <= 0: return jsonify({"status": "error", "message": "Invalid parameters"}), 400
+            if not all(math.isfinite(v) for v in (amount, speed, bed_size)) or speed <= 0 or bed_size <= 0:
+                return jsonify({"status": "error", "message": "Invalid parameters"}), 400
         except (ValueError, TypeError):
             return jsonify({"status": "error", "message": "Invalid parameter types"}), 400
 
@@ -72,14 +78,15 @@ def goto_absolute():
         if not state.printer_state["is_homed"]: return jsonify({"status": "error", "message": "Home first!"}), 403
         try:
             speed, bed_size, z_hop = min(float(request.json.get('speed', 12000)), 18000), float(request.json.get('bed_size', 180.0)), float(request.json.get('z_hop', 4.0))
-            if speed <= 0 or z_hop < 0 or bed_size <= 0: return jsonify({"status": "error", "message": "Invalid parameters"}), 400
+            if not all(math.isfinite(v) for v in (speed, bed_size, z_hop)) or speed <= 0 or z_hop < 0 or bed_size <= 0:
+                return jsonify({"status": "error", "message": "Invalid parameters"}), 400
         except (ValueError, TypeError): return jsonify({"status": "error", "message": "Invalid parameter types"}), 400
 
         x, y, z = request.json.get('x'), request.json.get('y'), request.json.get('z')
         cmds, duration = ["G90"], 0.2
         if None not in (x, y, z):
             nx, ny, nz = float(x), float(y), float(z)
-            if not (0 <= nx <= bed_size and 0 <= ny <= bed_size and 0 <= nz <= bed_size):
+            if not all(math.isfinite(v) for v in (nx, ny, nz)) or not (0 <= nx <= bed_size and 0 <= ny <= bed_size and 0 <= nz <= bed_size):
                 return jsonify({"status": "error", "message": "HARD STOP: Out of bounds."}), 400
             safe_z = min(nz + 2.0 * z_hop, bed_size)
             state.printer_state["position"].update({'x': nx, 'y': ny, 'z': nz})
@@ -125,7 +132,8 @@ def plot_paths_sd():
     try:
         speed, z_hop, bed_size = min(float(data.get('speed', 12000)), 18000.0), float(data.get('z_hop', 4.0)), float(data.get('bed_size', 180.0))
         origin_z = float(data.get('bbox', {}).get('origin_z', 0.0))
-        if speed <= 0 or z_hop < 0 or bed_size <= 0 or not (0 <= origin_z <= bed_size): raise ValueError()
+        if not all(math.isfinite(v) for v in (speed, z_hop, bed_size, origin_z)) or speed <= 0 or z_hop < 0 or bed_size <= 0 or not (0 <= origin_z <= bed_size):
+            raise ValueError()
     except Exception: return jsonify({"status": "error", "message": "Invalid plotting parameters."}), 400
 
     gcode_str = generate_full_gcode(paths, origin_z, speed, z_hop, bed_size, is_download=False)
@@ -152,7 +160,8 @@ def download_gcode():
         z_hop = float(data.get('z_hop', 4.0))
         bed_size = float(data.get('bed_size', 180.0))
         origin_z = float(data.get('bbox', {}).get('origin_z', 0.0))
-        if speed <= 0 or z_hop < 0 or bed_size <= 0 or not (0 <= origin_z <= bed_size): raise ValueError()
+        if not all(math.isfinite(v) for v in (speed, z_hop, bed_size, origin_z)) or speed <= 0 or z_hop < 0 or bed_size <= 0 or not (0 <= origin_z <= bed_size):
+            raise ValueError()
     except Exception:
         return jsonify({"status": "error", "message": "Invalid plotting parameters."}), 400
 
@@ -186,7 +195,8 @@ def plot_paths():
         z_hop = float(data.get('z_hop', 4.0))
         bed_size = float(data.get('bed_size', 180.0))
         origin_z = float(data.get('bbox', {}).get('origin_z', 0.0))
-        if speed <= 0 or z_hop < 0 or bed_size <= 0 or not (0 <= origin_z <= bed_size): raise ValueError()
+        if not all(math.isfinite(v) for v in (speed, z_hop, bed_size, origin_z)) or speed <= 0 or z_hop < 0 or bed_size <= 0 or not (0 <= origin_z <= bed_size):
+            raise ValueError()
     except Exception: return jsonify({"status": "error", "message": "Invalid plotting parameters."}), 400
 
     with state.state_lock:
