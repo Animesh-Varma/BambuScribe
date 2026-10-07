@@ -35,7 +35,7 @@
             max-width: 290px;
             opacity: 0;
             transform: scale(0.94) translateY(4px);
-            transition: opacity 0.1s cubic-bezier(0.2, 0, 1), transform 0.1s cubic-bezier(0.2, 0, 1);
+            transition: opacity 0.1s cubic-bezier(0.2, 0, 0, 1), transform 0.1s cubic-bezier(0.2, 0, 0, 1);
             white-space: normal;
             word-break: normal;
         }
@@ -80,7 +80,7 @@
             <p style="margin-bottom:24px; color:var(--text-color);">Stream via WiFi for live control, or send the entire file to the printer's SD card to run autonomously.</p>
             <div style="display:flex; flex-direction:column; gap:16px;">
                 <md-filled-button id="btn-sd-plot" onclick="startPlot('send')"><md-icon slot="icon">sd_card</md-icon> Send to SD Card</md-filled-button>
-                <md-filled-tonal-button onclick="startPlot('stream')"><md-icon slot="icon">wifi</md-icon> Stream via WiFi</md-filled-tonal-button>
+                <md-filled-tonal-button onclick="startPlot('stream')"><md-icon slot="icon">wifi</md-icon> Stream via WiFi</md-filled-button>
                 <md-outlined-button onclick="closePlotModal()">Cancel</md-outlined-button>
             </div>
         </div>
@@ -325,10 +325,10 @@
             <div id="view-image" style="display: none; grid-template-columns: 1fr 1fr; gap: 24px;">
                 <div style="display: flex; flex-direction: column; gap: 16px;">
                     <div style="display: flex; gap: 16px;">
-                        <div class="img-uploader" id="upload-box" onclick="document.getElementById('img-input').click()">
+                        <div class="img-uploader" id="upload-box" tabindex="0" role="button" aria-label="Upload Image" onclick="document.getElementById('img-input').click()" onkeydown="if(event.key === 'Enter' || event.key === ' ') { event.preventDefault(); document.getElementById('img-input').click(); }">
                             <md-icon style="font-size: 48px; color: var(--md-sys-color-primary);">add_photo_alternate</md-icon>
                             <p style="font-size: 16px; font-weight: 500; margin: 10px 0 0 0;">Upload Image</p>
-                            <input type="file" id="img-input" accept="image/png, image/jpeg, image/webp" style="display: none;">
+                            <input type="file" id="img-input" accept="image/png, image/jpeg, image/webp" style="display: none;" aria-label="Upload Image File">
                         </div>
                         <div id="preview-wrapper" style="display: none; flex: 1; flex-direction: column; gap: 12px; align-items: center; width: 100%;">
                             <canvas id="preview-2d" style="width: 100%; aspect-ratio: 1; border: 1px solid var(--border-color); border-radius: 12px; background: var(--canvas-bg);"></canvas>
@@ -471,7 +471,7 @@
 
                     <md-outlined-select id="img-speed" label="Plot Speed">
                         <md-select-option value="2000"><div slot="headline">Slow (2000)</div></md-select-option>
-                        <md-select-option value="5000"><div slot="headline">Normal (5000)</div></md-select-option>
+                        <md-select-option value="5000" selected><div slot="headline">Normal (5000)</div></md-select-option>
                         <md-select-option value="12000" selected><div slot="headline">Fast (12000)</div></md-select-option>
                         <md-select-option value="18000"><div slot="headline">Max (18000)</div></md-select-option>
                     </md-outlined-select>

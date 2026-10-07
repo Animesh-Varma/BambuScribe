@@ -37,6 +37,7 @@ let workerMsgId = 0;
 function getPyodideWorker() {
     if (!pyodideWorker) {
         pyodideWorker = new Worker('./static/js/pyodide-worker.js');
+
         pyodideWorker.onmessage = (e) => {
             const { status, message, id } = e.data;
             if (status === 'loading') {
@@ -52,20 +53,51 @@ function getPyodideWorker() {
                 if (loader && !isPreviewing) loader.style.display = 'none';
             }
             if (id && pendingWorkerCallbacks.has(id)) {
-                const cb = pendingWorkerCallbacks.get(id);
+                const { resolve, timer } = pendingWorkerCallbacks.get(id);
+                clearTimeout(timer);
                 pendingWorkerCallbacks.delete(id);
-                cb(e.data);
+                resolve(e.data);
             }
         };
+
+        const handleWorkerFailure = (err) => {
+            console.error('[Pyodide Worker Failure]', err);
+            const errMsg = err?.message || 'Pyodide worker failed or was terminated.';
+            for (const [id, { reject, timer }] of pendingWorkerCallbacks.entries()) {
+                clearTimeout(timer);
+                reject(new Error(errMsg));
+            }
+            pendingWorkerCallbacks.clear();
+            pyodideWorker = null;
+            pyodideReady = false;
+            const loader = document.getElementById('engine-loader');
+            if (loader) loader.style.display = 'none';
+        };
+
+        pyodideWorker.onerror = handleWorkerFailure;
+        pyodideWorker.onmessageerror = handleWorkerFailure;
     }
     return pyodideWorker;
 }
 
-function callWorker(action, data) {
-    return new Promise((resolve) => {
+function callWorker(action, data, timeoutMs = 60000) {
+    return new Promise((resolve, reject) => {
         const id = ++workerMsgId;
-        pendingWorkerCallbacks.set(id, resolve);
-        getPyodideWorker().postMessage({ action, id, data });
+        const timer = setTimeout(() => {
+            if (pendingWorkerCallbacks.has(id)) {
+                pendingWorkerCallbacks.delete(id);
+                reject(new Error(`Worker action '${action}' timed out.`));
+            }
+        }, timeoutMs);
+
+        pendingWorkerCallbacks.set(id, { resolve, reject, timer });
+        try {
+            getPyodideWorker().postMessage({ action, id, data });
+        } catch (err) {
+            clearTimeout(timer);
+            pendingWorkerCallbacks.delete(id);
+            reject(err);
+        }
     });
 }
 
@@ -229,7 +261,7 @@ function updateBBoxFromStaticInputs() {
     const cy = !isNaN(cyVal) ? cyVal : (BED_SIZE / 2.0);
 
     const zVal = parseFloat(document.getElementById('toolhead-z')?.value);
-    const z = Math.max(0, !isNaN(zVal) ? zVal : 30.0);
+    const z = Math.max(0, Math.min(BED_SIZE, !isNaN(zVal) ? zVal : 30.0));
 
     const minX = Math.max(0, cx - (w / 2.0));
     const maxX = Math.min(BED_SIZE, cx + (w / 2.0));
@@ -817,7 +849,7 @@ function getPayload() {
     if (isWebMode) {
         if (bboxPoints.length !== 4) updateBBoxFromStaticInputs();
         const rawZ = parseFloat(document.getElementById('toolhead-z')?.value);
-        const toolheadZ = !isNaN(rawZ) ? rawZ : 30.0;
+        const toolheadZ = Math.max(0, Math.min(BED_SIZE, !isNaN(rawZ) ? rawZ : 30.0));
         var bbox = {
             min_x: Math.min(...bboxPoints.map(p => p.x)),
             max_x: Math.max(...bboxPoints.map(p => p.x)),
@@ -827,12 +859,14 @@ function getPayload() {
         };
     } else {
         if (bboxPoints.length !== 4) return null;
+        const rawOriginZ = bboxPoints[0]?.z;
+        const validOriginZ = Math.max(0, Math.min(BED_SIZE, !isNaN(rawOriginZ) ? rawOriginZ : 0.0));
         var bbox = {
             min_x: Math.min(...bboxPoints.map(p => p.x)),
             max_x: Math.max(...bboxPoints.map(p => p.x)),
             min_y: Math.min(...bboxPoints.map(p => p.y)),
             max_y: Math.max(...bboxPoints.map(p => p.y)),
-            origin_z: bboxPoints[0].z || 0.0
+            origin_z: validOriginZ
         };
     }
 
@@ -945,8 +979,16 @@ async function triggerPreview() {
         if (!isWebMode) {
             try {
                 const res = await fetch('/api/preview', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
-                if (res.ok) data = await res.json();
-            } catch (e) {}
+                if (res.ok) {
+                    data = await res.json();
+                } else {
+                    const errData = await res.json().catch(() => ({}));
+                    showWarning(errData.message || `Preview generation failed (HTTP ${res.status})`);
+                    return;
+                }
+            } catch (e) {
+                // Local server offline -> gracefully fall back to in-browser worker
+            }
         }
 
         if (!data) {
@@ -1063,16 +1105,29 @@ window.confirmDownloadGCode = async function() {
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(payload)
                 });
-                if (response.ok) blob = await response.blob();
-            } catch (e) {}
+                if (response.ok) {
+                    blob = await response.blob();
+                } else {
+                    const errData = await response.json().catch(() => ({}));
+                    showWarning(errData.message || `Download failed (HTTP ${response.status})`);
+                    btnDownload.innerHTML = originalText;
+                    btnDownload.disabled = false;
+                    return;
+                }
+            } catch (e) {
+                // Local server offline -> fallback to worker
+            }
         }
 
         if (!blob) {
             const res = await callWorker('generate_gcode', payload);
-            if (res.status === 'success') {
+            if (res && res.status === 'success') {
                 blob = new Blob([res.gcode], { type: 'text/plain;charset=utf-8' });
             } else {
-                showWarning(res.message || "G-code compile failed.");
+                showWarning((res && res.message) || "G-code compile failed.");
+                btnDownload.innerHTML = originalText;
+                btnDownload.disabled = false;
+                return;
             }
         }
 
@@ -1084,7 +1139,10 @@ window.confirmDownloadGCode = async function() {
             a.download = 'bambuscribe_plot.gcode';
             document.body.appendChild(a);
             a.click();
-            window.URL.revokeObjectURL(url);
+            setTimeout(() => {
+                a.remove();
+                window.URL.revokeObjectURL(url);
+            }, 1000);
         }
     } catch (e) {
         showWarning("Download Error: " + e.message);

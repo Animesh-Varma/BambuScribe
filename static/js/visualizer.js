@@ -76,10 +76,41 @@ export class PlotterVisualizer {
         this.animate();
     }
 
+    disposeGroup(group) {
+        if (!group) return;
+        group.traverse(child => {
+            if (child.geometry) {
+                child.geometry.dispose();
+            }
+            if (child.material) {
+                if (Array.isArray(child.material)) {
+                    child.material.forEach(m => m.dispose && m.dispose());
+                } else if (child.material.dispose) {
+                    child.material.dispose();
+                }
+            }
+        });
+        group.clear();
+    }
+
     initScene(bedSize) {
         this.bedSize = bedSize || 180;
-        if (this.gridHelper) this.scene.remove(this.gridHelper);
-        if (this.wireframeBox) this.scene.remove(this.wireframeBox);
+        if (this.gridHelper) {
+            this.scene.remove(this.gridHelper);
+            if (this.gridHelper.geometry) this.gridHelper.geometry.dispose();
+            if (this.gridHelper.material) {
+                if (Array.isArray(this.gridHelper.material)) this.gridHelper.material.forEach(m => m.dispose());
+                else if (this.gridHelper.material.dispose) this.gridHelper.material.dispose();
+            }
+        }
+        if (this.wireframeBox) {
+            this.scene.remove(this.wireframeBox);
+            if (this.wireframeBox.geometry) this.wireframeBox.geometry.dispose();
+            if (this.wireframeBox.material) {
+                if (Array.isArray(this.wireframeBox.material)) this.wireframeBox.material.forEach(m => m.dispose());
+                else if (this.wireframeBox.material.dispose) this.wireframeBox.material.dispose();
+            }
+        }
 
         this.gridHelper = new THREE.GridHelper(this.bedSize, this.bedSize / 10, 0x888888, 0x555555);
         this.wireframeBox = new THREE.LineSegments(
@@ -142,7 +173,10 @@ export class PlotterVisualizer {
     drawPreview(paths, outPaths, originZ, bedSize, isDarkMode) {
         this.bedSize = bedSize || this.bedSize || 180;
         this.lastPreviewArgs = { paths, outPaths, originZ, bedSize: this.bedSize, isDarkMode };
-        this.textPathsGroup.clear();
+
+        // Dispose existing GPU geometries and materials to avoid WebGL context loss
+        this.disposeGroup(this.textPathsGroup);
+        this.materials.forEach(m => m.dispose && m.dispose());
         this.materials = [];
 
         const inkColor = isDarkMode ? 0x4fd8eb : 0x006874;
@@ -205,7 +239,8 @@ export class PlotterVisualizer {
     }
 
     clearPaths() {
-        this.textPathsGroup.clear();
+        this.disposeGroup(this.textPathsGroup);
+        this.materials.forEach(m => m.dispose && m.dispose());
         this.materials = [];
         this.lastPreviewArgs = null;
     }

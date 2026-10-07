@@ -64,7 +64,7 @@ One thing I noticed with existing mounts is that the pen is physically offset fr
 - **6-Stage Path Optimization Pipeline:**
   - Drastically optimizes drawing sequences and cuts plot times using sub-line-width Ramer–Douglas–Peucker (RDP) path decimation, segment sorting, and travel distance minimization.
 - **Dynamic Bounding Box Clipping & Out-of-Bounds Preview:**
-  - Mathematically slices vector segments at the bounding box boundaries via `split_segment_by_bbox` without throwing hard errors.
+  - Mathematically slices vector segments at bounding box boundaries without throwing hard stop errors.
   - Slices paths into `safe_paths` (printable) and `out_paths` (clipped), dynamically rendering out-of-bounds segments in high-contrast red on both the 2D canvas and 3D visualizer.
 - **Standalone G-code Export & SD Execution:**
   - Generate standalone, safe G-code with configurable plot parameters via `/api/download_gcode` or directly from the Web App.
@@ -149,10 +149,12 @@ Below are visualizer-generated vector paths produced by BambuScribe's mathematic
 
 ### **2. Path Optimization & Clipping Pipeline**
 Before ink ever touches paper, input curves and vectors are processed through a 6-stage pipeline:
-1. **Mathematical Clipping:** Vectors intersecting the canvas boundaries are sliced via `split_segment_by_bbox`.
+1. **Noise Filtering:** Discards spurious micro-strokes below the minimum stroke threshold (`min_stroke_length`) while preserving deliberate stipple dots.
 2. **Sub-line-width RDP Decimation:** Micro-segments and collinear points are reduced using the Ramer–Douglas–Peucker algorithm to prevent jerky toolhead motion.
-3. **TSP / Path Reordering:** Travel moves are minimized to speed up overall execution.
-4. **Out-of-Bounds Classification:** Out-of-bounds segments are separated into `out_paths` and displayed in red on the 3D visualizer.
+3. **TSP / Path Reordering:** Minimizes rapid travel moves and pen lifts using greedy nearest-neighbor Euclidean distance ordering.
+4. **Direction Optimization:** Dynamically flips polyline directions when drawing backwards is faster than moving to the start point.
+5. **Continuous Gap Stitching:** Bridges minute air gaps between consecutive segments to minimize unnecessary pen lifts.
+6. **Mathematical Clipping & Out-of-Bounds Classification:** Vectors intersecting canvas boundaries are cleanly sliced at bounding box edges; printable segments are placed in `safe_paths` while out-of-bounds segments are tagged as `out_paths` (displayed in red on the visualizer).
 
 ### **3. Autonomous SD Execution & Streaming**
 - **Autonomous SD / 3MF:** BambuScribe packages plotted toolpaths into a valid `.3mf` ZIP archive containing metadata files to satisfy the printer's internal parser. It uploads the package over Implicit FTPS (port 990) and commands the printer via MQTT to initiate printing.

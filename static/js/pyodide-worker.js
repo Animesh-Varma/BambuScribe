@@ -9,6 +9,8 @@ importScripts("https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js");
 let pyodide = null;
 let isReady = false;
 let initPromise = null;
+let pyProcessPaths = null;
+let pyGenerateGcode = null;
 
 async function initPyodideWorker() {
     if (initPromise) return initPromise;
@@ -83,14 +85,22 @@ def py_generate_gcode(payload_json_str):
     if paths is None:
         return json.dumps({"status": "error", "message": msg})
 
-    speed = float(data.get('speed', 12000))
-    z_hop = float(data.get('z_hop', 4.0))
-    bed_size = float(data.get('bed_size', 180.0))
-    origin_z = float(data.get('bbox', {}).get('origin_z', 0.0))
+    try:
+        speed = min(float(data.get('speed', 12000)), 18000.0)
+        z_hop = float(data.get('z_hop', 4.0))
+        bed_size = float(data.get('bed_size', 180.0))
+        origin_z = float(data.get('bbox', {}).get('origin_z', 0.0))
+        if speed <= 0 or z_hop < 0 or bed_size <= 0 or not (0 <= origin_z <= bed_size):
+            raise ValueError()
+    except Exception:
+        return json.dumps({"status": "error", "message": "Invalid plotting parameters provided."})
 
     gcode = generate_full_gcode(paths, origin_z, speed, z_hop, bed_size, is_download=True)
     return json.dumps({"status": "success", "gcode": gcode})
             `);
+
+            pyProcessPaths = pyodide.globals.get('py_process_paths');
+            pyGenerateGcode = pyodide.globals.get('py_generate_gcode');
 
             isReady = true;
             self.postMessage({ status: 'ready', message: 'Pyodide engine ready.' });
@@ -113,12 +123,12 @@ self.onmessage = async (event) => {
 
         if (action === 'generate_preview') {
             const jsonStr = JSON.stringify(data);
-            const resJson = await pyodide.runPythonAsync(`py_process_paths(${JSON.stringify(jsonStr)})`);
+            const resJson = pyProcessPaths(jsonStr);
             const parsed = JSON.parse(resJson);
             self.postMessage({ id, ...parsed });
         } else if (action === 'generate_gcode') {
             const jsonStr = JSON.stringify(data);
-            const resJson = await pyodide.runPythonAsync(`py_generate_gcode(${JSON.stringify(jsonStr)})`);
+            const resJson = pyGenerateGcode(jsonStr);
             const parsed = JSON.parse(resJson);
             self.postMessage({ id, ...parsed });
         } else if (action === 'ping') {
