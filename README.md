@@ -1,13 +1,17 @@
 # BAMBUSCRIBE
 **An open-source suite to transform your Bambu Lab 3D printer into a precision 2D plotter**
 
-![Version](https://img.shields.io/badge/Version-v1.1.1-blue?style=flat-square)
+![Version](https://img.shields.io/badge/Version-v2.0.0-blue?style=flat-square)
 ![License: GPL v3](https://img.shields.io/badge/License-GPLv3-green.svg?style=flat-square)
-[![Demo Video](https://img.shields.io/badge/YouTube-Watch_Demo-red?style=flat-square&logo=youtube)](https://youtu.be/aic8SkLXlUo)
+[![Live Web App](https://img.shields.io/badge/Try_Online-Web_App-blueviolet?style=flat-square&logo=googlechrome)](https://animesh-varma.github.io/BambuScribe/)
+[![Roadmap](https://img.shields.io/badge/Roadmap-GitHub_Projects-orange?style=flat-square&logo=github)](https://github.com/users/Animesh-Varma/projects/3)
+[![Demo Video](https://img.shields.io/badge/YouTube-Watch_Demo_(v1.1.0)-red?style=flat-square&logo=youtube)](https://www.youtube.com/watch?v=aic8SkLXlUo)
 
 Bambu Lab printers possess incredibly fast, precise CoreXY kinematics. While they are phenomenal at extruding plastic, that same hardware is perfect for high-speed 2D plotting, drawing, and vector art. 
 
-Usually, turning a 3D printer into a plotter requires fighting with slicer software, faking Z-heights, and manually transferring SD cards. BambuScribe bypasses all of that. By establishing a direct Service Level Connection (SLC) via MQTT and FTPS, BambuScribe packages and executes code autonomously over your local network, effectively turning your 3D printer into a live, interactive robotic arm controlled from your web browser.
+Usually, turning a 3D printer into a plotter requires fighting with slicer software, faking Z-heights, and manually transferring SD cards. BambuScribe simplifies this entire workflow. Supporting both direct local machine orchestration (via MQTT/FTPS) and **serverless web execution via Pyodide WebAssembly**, BambuScribe packages and executes vector art autonomously, effectively turning your 3D printer into a live plotter right from your browser.
+
+>  **Want to try it without installing anything?** Launch the standalone [**BambuScribe Web App**](https://animesh-varma.github.io/BambuScribe/) directly in your browser to configure your canvas, generate vector art, preview toolpaths, and download ready-to-run G-code!
 
 ---
 
@@ -17,11 +21,11 @@ To use BambuScribe, you will need a physical pen attachment for your toolhead.
 
 After my search, the best one to my knowledge is the **A1 Plotter Module** designed by *TeQiller*. I am currently using this mount, and you can download it from [MakerWorld](https://makerworld.com/en/models/2433877-a1-plotter-module).
 
-One thing I noticed with existing mounts is that the pen is physically offset from the nozzle. Because of this, I will be designing a custom pen holder in the near future. **If anyone has experience in CAD software, please help me with this!** 
+One thing I noticed with existing mounts is that the pen is physically offset from the nozzle. Because of this, I will be designing a custom pen holder by the next release. **If anyone has experience in CAD software, please help me with this!** 
 
 **Crucial Hardware Recommendations:**
-1. **Flip the Build Plate:** Turn your build plate over to the smooth/blank side before plotting. This provides a better drawing surface and protects your textured PEI coating from accidental ink stains or scratches.
-2. **Set Pen Lower Than Nozzle:** Ensure the tip of your pen (should be a ball point!!) extends further down than the printer's hotend nozzle. Because BambuScribe uses dynamic Z-axis bounding boxes, this ensures the pen tip is the only thing making contact with your paper, preventing the nozzle from accidentally striking the bed.
+1. **Flip the Build Plate:** Turn your build plate over before plotting. This provides a better drawing surface and protects your textured PEI coating from accidental ink stains or scratches.
+2. **Set Pen Lower Than Nozzle:** Ensure the tip of your pen (should be a ball point!!) extends further down than the printer's hotend nozzle. Because BambuScribe uses dynamic Z-axis bounding boxes, this ensures the pen tip is the only thing making contact with your paper, preventing the nozzle from accidentally striking the bed (some plotting modes benefit from the pen being as sturdy as possible; for them, try to keep the pen as close to the mount body as possible, hence minimizing shaking).
 3. **Use Bed Magnets:** It is highly recommended to secure your paper using strong magnets placed along the edges of your build plate to prevent the paper from sliding or shifting during rapid movement.
 
 <div align="center">
@@ -32,18 +36,18 @@ One thing I noticed with existing mounts is that the pen is physically offset fr
 
 ---
 
-<h3 align="center">Contents</h2>
+<h3 align="center">Contents</h3>
 
 <p align="center">
   <a href="#features">Features</a> •
   <a href="#showcase">Showcase</a> •
   <a href="#how-it-works">How It Works</a> •
-  <a href="#interface-overview">Interface Overview</a> •
+  <a href="#try-the-interface">Web App</a> •
   <a href="#known-issues--limitations">Known Issues</a>
   <br>
-  <a href="#roadmap">Roadmap</a> •
+  <a href="#roadmap--project-board">Roadmap</a> •
   <a href="#technical-stack">Tech Stack</a> •
-  <a href="#build-instructions">Build</a> •
+  <a href="#build--usage-instructions">Build & Usage</a> •
   <a href="#contact">Contact</a>
 </p>
 
@@ -51,42 +55,79 @@ One thing I noticed with existing mounts is that the pen is physically offset fr
 
 ## Features
 
-- **Untethered Autonomous Plotting (New in v1.1.0!):** Choose to package your plot into a Bambu-compliant `.3mf` file. BambuScribe will securely upload it directly to your printer's SD card via Implicit FTPS and trigger the print. You can safely close your laptop or turn off your PC while the printer works!
-- **Live MQTT Streaming:** Prefer a live approach? BambuScribe can still calculate the toolpath in the browser, send it to the Flask backend, and stream raw G-code chunks directly to the printer over LAN in real-time.
-- **Printer Support:** Officially tested and supported on the Bambu Lab A1 Mini, featuring Beta support for the standard Bambu Lab A1.
-- **Interactive 3D Visualizer:** Features a built-in Three.js digital twin of your printer's build volume. Watch your toolhead move in real-time and preview exactly where ink will touch the paper before you hit print.
-- **Native Text Engine:** Uses Hershey Vector Fonts to generate pure single-line text paths. Features auto-wrapping, scaling, and cursive/standard typography styles. 
-- **Advanced Image Processing:** Upload an image and let the internal OpenCV/Pillow engine convert it into plotter-safe G-code with beautifully implemented styling algorithms.
-- **Live Camera Feed:** Injects the Bambu Lab raw JPEG stream directly into the UI so you can monitor your plot remotely.
-- **Virtual Bounding Boxes:** Jog the printhead to your paper's 4 corners and set a virtual bounding box to define your physical canvas. BambuScribe uses the Z-height of your first recorded point as the global reference for the drawing plane, safely accommodating various paper, pen or material thicknesses.
+- **Dual-Mode Architecture (Local & Serverless Web):**
+  - **Local Mode:** Connects to a modular local Flask backend for full physical hardware orchestration, live MQTT streaming, SD card uploads via FTPS, and live camera feed monitoring.
+  - **Web Mode (Pyodide Wasm):** Run the complete vector generation, path optimization, and G-code engine inside any modern browser using client-side WebAssembly—no Python environment or local server required! Includes static canvas calibration and graceful offline hardware locks.
+- **Advanced Vector Generation Algorithms:**
+  - Full suite of plotting algorithms: **Skeleton, Spiral, Squiggle, Flow-Field, Stipple (TSP), Contour, Crosshatching, and Edge / Line Art**.
+  - Arbitrary polyline generation with pen-width simulation and context-sensitive Material Design controls.
+- **6-Stage Path Optimization Pipeline:**
+  - Drastically optimizes drawing sequences and cuts plot times using sub-line-width Ramer–Douglas–Peucker (RDP) path decimation, segment sorting, and travel distance minimization.
+- **Dynamic Bounding Box Clipping & Out-of-Bounds Preview:**
+  - Mathematically slices vector segments at bounding box boundaries without throwing hard stop errors.
+  - Slices paths into `paths` (printable) and `out_paths` (clipped), dynamically rendering out-of-bounds segments in high-contrast red on both the 2D canvas and 3D visualizer.
+- **Standalone G-code Export & SD Execution:**
+  - Generate standalone, safe G-code with configurable plot parameters via `/api/download_gcode` or directly from the Web App.
+  - Built-in 4-step standalone SD execution flow: *Pre-home warning pause → G28 auto-home → Energized pause → Plot execution*.
+  - Step-by-step interactive instructions modal for standalone SD card plotting.
+- **Strict Homing Enforcement & Guardrails:**
+  - Direct plotting commands strictly require the machine to be homed first (`G28`). Dedicated UI popup modals alert and block unhomed operations to protect your toolhead.
+- **Interactive 3D Visualizer:**
+  - Digital twin build volume rendered via Three.js. Automatically updates previews in real-time, displays ink contact lines, highlights out-of-bounds paths in red, and previews physical toolhead paths.
+- **Native Typography Engine:**
+  - Single-line Hershey vector typography featuring live word-wrapping, scaling, and cursive, standard, or fancy script styles.
+- **Untethered `.3mf` Packaging (Local Mode):**
+  - Packages raw toolpaths into Bambu-compliant `.3mf` archives and transfers them over Implicit FTPS (port 990) for completely autonomous plotting.
+- **Live MQTT Streaming (Local Mode):**
+  - Custom real-time packet chunking engine streams raw G-code over local Wi-Fi with acknowledgment tracking.
 
 ---
 
 ## Showcase
 
-BambuScribe's processing engine is fully featured and capable of handling complex image algorithms and typography with precision. All image generation constraints have been resolved and implemented beautifully.
-
-### Video Demo
-
-See BambuScribe (v1.1.0) in action! Watch the demonstration video on YouTube:
+### Video Walkthrough
 
 <div align="center">
-  <a href="https://youtu.be/aic8SkLXlUo">
+  <a href="https://www.youtube.com/watch?v=aic8SkLXlUo">
     <img src="https://markdown-videos-api.jorgenkh.no/youtube/aic8SkLXlUo" alt="BambuScribe YouTube Demo Video">
   </a>
   <br>
-  <i>Click the thumbnail above to watch the demo video!</i>
+  <i>⚠️ <b>Note:</b> This demo showcases v1.1.0 and does not reflect the new serverless mode, or expanded algorithm suite. An updated walkthrough is currently in production!</i>
 </div>
+
 <br>
 
-### Image Styles
+### Image Styles & Visualizer Previews
+
+Below are visualizer-generated vector paths produced by BambuScribe's mathematical engines. *(Due to the time required to physically plot every high-density variation on paper, these showcases represent the exact toolpaths rendered by the 2D/3D visualizer preview engine).*
 
 <div align="center">
 
-| Original Reference |            Crosshatching <br>*(Supports down to 0.1mm, shot at ~0.6mm)*             | Stippling (TSP) | Edge / Line Art |
-|:---:|:-----------------------------------------------------------------------------------:|:---:|:---:|
-| <img src="assets/showcase_original.jpg" alt="Original Reference Image" width="180"> | <img src="assets/showcase_crosshatching.jpg" alt="Crosshatching Style" width="180"> | <img src="assets/showcase_stippling.jpg" alt="Stippling Style" width="180"> | <img src="assets/showcase_lineart.jpg" alt="Line Art Style" width="180"> |
+| Original Reference | Crosshatching | Vector Edge Tracing | Topographic Contours | Flow Field Engraving |
+|:---:|:---:|:---:|:---:|:---:|
+| <img src="assets/showcase_original.jpg" alt="Original Reference" width="160"> | <img src="assets/preview_crosshatching.png" alt="Crosshatching Preview" width="160"> | <img src="assets/preview_edge_tracing.png" alt="Vector Edge Tracing Preview" width="160"> | <img src="assets/preview_contours.png" alt="Topographic Contours Preview" width="160"> | <img src="assets/preview_flowfield.png" alt="Flow Field Engraving Preview" width="160"> |
+
+| Centerline / Skeleton | Archimedean Spiral | Serpentine Squiggle | Blue-Noise Stipple | TSP Tour |
+|:---:|:---:|:---:|:---:|:---:|
+| <img src="assets/preview_skeleton.png" alt="Centerline / Skeleton Preview" width="160"> | <img src="assets/preview_spiral.png" alt="Archimedean Spiral Preview" width="160"> | <img src="assets/preview_squiggle.png" alt="Serpentine Squiggle Preview" width="160"> | <img src="assets/preview_stipple.png" alt="Blue-Noise Stipple Preview" width="160"> | <img src="assets/preview_tsp.png" alt="TSP Tour Preview" width="160"> |
+
 </div>
+
+<details>
+<summary><b> Algorithmic Details & Functions</b></summary>
+<br>
+
+- **Crosshatching (`gen_hatch`):** Directional multi-pass crosshatching across 4 angle intervals with progressive thresholding.
+- **Vector Edge Tracing (`gen_canny`):** Canny edge detection followed by contour polyline extraction.
+- **Topographic Contours (`gen_contours`):** Multi-level Gaussian-blurred threshold contour extraction across brightness levels.
+- **Flow Field Engraving (`gen_flow_field`):** Sobel gradient tensor vector fields with tone-spaced seed points and bidirectional streamline tracing.
+- **Centerline / Skeleton (`gen_skeleton`):** Otsu binarization with vectorized Zhang-Suen morphological thinning and graph polyline tracing.
+- **Archimedean Spiral (`gen_spiral`):** Center-outward spiral with tone-modulated sinusoidal wave amplitudes.
+- **Serpentine Squiggle (`gen_squiggle`):** Alternating horizontal scanlines with tone-modulated sinusoidal wave amplitudes.
+- **Blue-Noise Stipple (`gen_stipple`):** Probabilistic tone rejection sampling with 2-pass spatial repulsion relaxation for standalone dot marks.
+- **TSP Tour (`gen_stipple` with `tsp_connect=True`):** Traveling Salesperson nearest-neighbor path linking relaxed stipple points into continuous single-line strokes.
+
+</details>
 
 ### Typography & Text Engine
 
@@ -102,91 +143,80 @@ See BambuScribe (v1.1.0) in action! Watch the demonstration video on YouTube:
 
 ## How It Works
 
-### **The SD Handoff Pipeline**
+### **1. Dual Execution Engines**
+- **Web Mode (Pyodide / WASM):** Automatically detected when hosted statically on GitHub Pages. Vector algorithms, path optimization, and G-code generation run entirely inside an in-browser WebWorker powered by Pyodide, allowing you to configure, preview, and download ready-to-run G-code without running a local Python server.
+- **Local Mode (Flask Backend):** Connects to a modular Python service running locally. Enables full device control, direct coordinate jogging, live camera feeds, and automated network uploads.
 
-When running autonomously, BambuScribe packages the raw plotted G-code into a standard `.3mf` ZIP archive containing metadata files (`[Content_Types].xml` and `slice_info.config`) to prevent the printer's touchscreen parser from crashing. It then connects to the printer via a secure FTP client on port 990, uploads the archive, and sends an MQTT `project_file` command to trigger the plot.
+### **2. Path Optimization & Clipping Pipeline**
+Before ink ever touches paper, input curves and vectors are processed through a 6-stage pipeline:
+1. **Noise Filtering:** Discards spurious micro-strokes below the minimum stroke threshold (`min_stroke_length`) while preserving deliberate stipple dots.
+2. **Sub-line-width RDP Decimation:** Micro-segments and collinear points are reduced using the Ramer–Douglas–Peucker algorithm to prevent jerky toolhead motion.
+3. **TSP / Path Reordering:** Minimizes rapid travel moves and pen lifts using greedy nearest-neighbor Euclidean distance ordering.
+4. **Direction Optimization:** Dynamically flips polyline directions when drawing backwards is faster than moving to the start point.
+5. **Continuous Gap Stitching:** Bridges minute air gaps between consecutive segments to minimize unnecessary pen lifts.
+6. **Mathematical Clipping & Out-of-Bounds Classification:** Vectors intersecting canvas boundaries are cleanly sliced at bounding box edges; printable segments are placed in `paths` while out-of-bounds segments are tagged as `out_paths` (displayed in red on the visualizer).
 
-### **The Streaming Pipeline**
-
-If running in live-stream mode, BambuScribe utilizes a **Custom Chunking Pipeline**. Because a printer's internal buffer will choke if you send a 50,000-line G-code file all at once over MQTT, the backend groups the paths into timed chunks, tracking acknowledgments from the printer to feed the buffer smoothly.
+### **3. Autonomous SD Execution & Streaming**
+- **Autonomous SD / 3MF:** BambuScribe packages plotted toolpaths into a valid `.3mf` ZIP archive containing metadata files to satisfy the printer's internal parser. It uploads the package over Implicit FTPS (port 990) and commands the printer via MQTT to initiate printing.
+- **Direct G-Code Export:** Standalone G-code files include safe sequencing: pre-homing warning pauses, `G28` auto-homing, energized pen-drop verification pauses, and coordinated drawing routines.
+- **Live MQTT Chunking:** For live-streaming, BambuScribe batches paths into rate-limited chunks, tracking firmware acknowledgments to ensure the printer's command buffer is fed reliably.
 
 ---
 
-## Interface Overview
+## Try the Interface
 
-BambuScribe features a responsive, Material Design interface. Below are reference documents showcasing the Light and Dark mode variations of the control dashboard.
-
-Because GitHub cannot natively render PDF files directly on the page, the user interface layouts are displayed below as images. 
-
-You can access the original high-resolution vector PDF files directly here:
-- [View Light Mode PDF (BambuScribe.pdf)](./assets/BambuScribe.pdf)
-- [View Dark Mode PDF (BambuScribe_Bl.pdf)](./assets/BambuScribe_Bl.pdf)
-
-### Interface Layouts (To be updated)
+Rather than browsing static screenshots, you can explore and test the entire interface live!
 
 <div align="center">
-
-| Dark Mode Panel | Light Mode Panel |
-|:---:|:---:|
-| <img src="assets/dashboard_dark-1.png" alt="BambuScribe Dark Mode Page 1" width="400"> | <img src="assets/dashboard_light-1.png" alt="BambuScribe Light Mode Page 1" width="400"> |
-| <img src="assets/dashboard_dark-2.png" alt="BambuScribe Dark Mode Page 2" width="400"> | <img src="assets/dashboard_light-2.png" alt="BambuScribe Light Mode Page 2" width="400"> |
-
+  <br>
+  <a href="https://animesh-varma.github.io/BambuScribe/">
+    <img src="https://img.shields.io/badge/Open_Live_App-animesh--varma.github.io%2FBambuScribe-blueviolet?style=for-the-badge&logo=googlechrome" alt="Open Web App">
+  </a>
+  <br><br>
+  <p><i>The static web deployment runs the entire vector engine via WebAssembly directly in your browser. You can input text, load images, test all vector algorithms, inspect 3D toolpaths, and export standalone G-code immediately.</i></p>
 </div>
-
-*Note: The actual camera feed view has been redacted in these documentation files for privacy.*
 
 ---
 
 ## Known Issues & Limitations
 
-Please read these carefully before using the software:
-
-- **SD Startup Delay:** After sending an untethered plot to the SD card, **the printer can take a good 5 to 15 seconds to unpack the 3MF file and begin moving.** The UI will say "Printing SD", but the machine may sit idle while it thinks. Be patient!
-- **Streaming Mode Limitations:** If you choose to use the "Stream via Wi-Fi" option instead of the SD card method, your host computer *must* remain awake and connected to Wi-Fi for the entire duration of the plot. Additionally, streaming mode is significantly slower than SD mode due to real-time packet validation.
-- **Unused Camera Feed:** Although the dashboard features a dedicated view for the live raw camera feed, it is currently unused—meaning it is not yet utilized for capturing timelapses or driving computer-vision-based auto-centering and calibration. This is set to change in the near future!
-- **No Skew Calibration:** The engine does not currently skew or warp text/images to match an angled bounding box.
-- **No Auto-Homing Recovery:** If the printer detects a hardware discrepancy (e.g., skipped steps), it will not auto-home to recover its coordinates. 
-- **No Audio Cues:** There are currently no sound alerts for finished plots or system errors.
-- **Network Requirements (LAN & Developer Mode):** You must have "LAN Only Mode" enabled on your printer (which temporarily disconnects it from the Bambu Handy cloud app), as well as "Developer Mode" turned on if it is applicable to your specific firmware version.
+- **SD Unpack Latency:** After uploading an untethered `.3mf` plot to the SD card, the printer may take 5–15 seconds to unpack and inspect the archive before moving.
+- **Streaming Mode Constraints:** Streaming over MQTT requires your host machine to remain awake and on the same Wi-Fi network throughout the duration of the plot.
+- **No Skew Calibration:** The engine does not currently apply affine skew transformations to counter angled paper boundaries.
+- **LAN & Developer Mode Required (Local Mode):** When using local hardware orchestration, the printer must be switched to **LAN Only Mode** with **Developer Mode** enabled.
 
 ---
 
-## Roadmap
+## Roadmap & Project Board
 
-*(Please note: There is no rigidly decided path forward. These features are just divided into phases for convenience and structure.)*
+Active development, upcoming tasks, feature requests, and bug tracking are tracked live on the official GitHub Project Board:
 
-### **Core Formats & Hardware**
+**[View the BambuScribe Project Board & Roadmap](https://github.com/users/Animesh-Varma/projects/3)**
 
-- **SVG & Document Support:** Bypass the internal engines entirely to upload pre-made vector art (.svg) and multi-page text documents (.pdf, .docx).
-- **Custom Pen Hardware:** Designing and publishing a original, optimized 3D-printed screw mount to center the pen and fix the nozzle offset.
-- **Multi-Color Support:** Adding pause sequences and UI prompts to allow for manual pen swapping for multi-colored plots.
-
-### **Intelligence & Expansion**
-
-- **Audio Cues & Sound Support:** Implementing auditory alerts and system pings for finished plots, manual pen swaps, or hardware boundary errors.
-- **Expanded Image Algorithms:** Adding advanced dithering algorithms, halftone dots, and multi-pass CMYK color separation for images to offer even more creative choices.
-- **Skew & Surface Interpolation:** Upgrading the bounding box math to support full affine transformations (skewing/warping text to match an angled bounding box) and 3D Z-height interpolation across all 4 corners to adapt to unlevel drawing planes.
-- **AI Handwriting Replication:** Integrating a generative AI model that analyzes a sample of your physical handwriting and plots text vectors mimicking your exact penmanship.
-- **Platform-Specific Apps:** Transitioning the web-wrapper into native Desktop/Mobile applications with session continuity.
-- **Printer Expansion:** Abstracting the kinematics engine to officially support the Bambu Lab P1P, P1S, X1C, and eventually non-Bambu network-capable CoreXY printers.
+### Current Priorities
+- **Core Formats & Hardware:** Direct `.svg` / vector document uploads, custom centered pen mount design, and multi-color pen pause sequences.
+- **Vision & Calibration:** Leveraging the live camera feed with computer vision for automatic paper boundary alignment.
+- **Surface Math:** 4-corner affine transformations and 3D Z-height bilinear interpolation across unlevel drawing planes.
+- **Expanded Hardware Support:** Expanding testing and kinematics profiles to the Bambu Lab P1P, P1S, X1C, and third-party CoreXY machines.
 
 ---
 
 ## Technical Stack
 
-- **Backend:** Python 3.10+, Flask
-- **Communication:** Paho-MQTT, Implicit FTPS, Socket/SSL (for Camera Stream)
-- **Frontend UI:** HTML/CSS/JS, Material Web Components
-- **3D Engine:** Three.js
-- **Media Processing:** OpenCV (Canny Edge), NumPy, Pillow (Image processing), Hershey-Fonts (Vector typography)
+- **Architecture:** Dual-mode architecture (Local Flask server or Static Serverless Pyodide WebAssembly).
+- **Backend (Local Mode):** Python 3.10+, Flask, modular architecture (`config`, `state`, `camera`, `algorithms`, `printer`).
+- **Network Protocols:** Paho-MQTT, Implicit FTPS (TLS 1.2+), Raw Socket/SSL (Camera stream).
+- **Frontend:** ES6 Modules (`main.js`, `visualizer.js`), Material Web Components (M3), Three.js (Digital Twin visualizer).
+- **Vector & Image Processing:** OpenCV, Pillow, Hershey-Fonts, NumPy, Ramer–Douglas–Peucker (RDP) path decimation.
 
 ---
 
-## Build Instructions
+## Build & Usage Instructions
 
-BambuScribe comes with a highly automated setup script that handles virtual environments and dependency management for you. 
+### Option 1: Web Mode (Zero Install)
+Open [**https://animesh-varma.github.io/BambuScribe/**](https://animesh-varma.github.io/BambuScribe/) in any modern desktop browser (Chrome, Edge, Firefox). Pyodide will initialize automatically in a background WebWorker, giving you instant access to vector generation, live 3D visualizers, and G-code export.
 
-Ensure you have Python 3.10+ installed on your system.
+### Option 2: Local Mode (Direct Printer Orchestration)
 
 **Finding Your Printer Credentials:**
 Before running the setup, you will need some information from your printer's physical screen:
@@ -219,7 +249,7 @@ Once running, open your web browser and navigate to `http://localhost:5050`.
 
 ## Contact
 
-**Note:** I am a high school student building this in my spare time. My foray into hardware orchestration, G-code manipulation, and network protocols is an ongoing learning process. Contributors, pull requests, and general advice are always welcome.
+**Note:** I am a high school student building this in my spare time. My foray into hardware orchestration, G-code manipulation, and network protocols is an ongoing learning process. Contributors, pull requests, and feedback are always welcome!
 
 Email: `animesh_varma@protonmail.com`
 
