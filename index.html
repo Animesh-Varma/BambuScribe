@@ -8,7 +8,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
     <link rel="stylesheet" href="./static/css/style.css">
-    <script type="module" src="https://esm.run/@material/web/all.js"></script>
+
     <script type="importmap">
         {
             "imports": {
@@ -17,6 +17,8 @@
             }
         }
     </script>
+    <script type="module" src="https://esm.run/@material/web/all.js"></script>
+
     <style>
         /* Fast-Reveal Material 3 Floating Tooltip */
         #m3-tooltip {
@@ -80,7 +82,7 @@
             <p style="margin-bottom:24px; color:var(--text-color);">Stream via WiFi for live control, or send the entire file to the printer's SD card to run autonomously.</p>
             <div style="display:flex; flex-direction:column; gap:16px;">
                 <md-filled-button id="btn-sd-plot" onclick="startPlot('send')"><md-icon slot="icon">sd_card</md-icon> Send to SD Card</md-filled-button>
-                <md-filled-tonal-button onclick="startPlot('stream')"><md-icon slot="icon">wifi</md-icon> Stream via WiFi</md-filled-tonal-button>
+                <md-filled-tonal-button onclick="startPlot('stream')"><md-icon slot="icon">wifi</md-icon> Stream via WiFi</md-filled-button>
                 <md-outlined-button onclick="closePlotModal()">Cancel</md-outlined-button>
             </div>
         </div>
